@@ -4,6 +4,8 @@
 
 **An offline-first, review-before-saving email-to-task app.** Built with React, FastAPI, SQLite, and a small local scikit-learn model. No mailbox permissions, GPU, or paid AI API required.
 
+[![GitHub Actions](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml/badge.svg)](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml)
+
 ![ActionInbox frontend checks](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-97a9ff) ![Local ML](https://img.shields.io/badge/ML-scikit--learn-b9ffa7) ![Review first](https://img.shields.io/badge/Task%20approval-Manual-93e6cc)
 
 ## Why this project
