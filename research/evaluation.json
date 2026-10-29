@@ -1,0 +1,260 @@
+{
+  "dataset": "27 independently phrased but manually authored synthetic samples (same topics as training)",
+  "count": 27,
+  "accuracy": 0.7778,
+  "macro_f1": 0.7782,
+  "labels": [
+    "document",
+    "meeting",
+    "other",
+    "payment",
+    "reply"
+  ],
+  "confusion_matrix": [
+    [
+      4,
+      0,
+      0,
+      0,
+      1
+    ],
+    [
+      0,
+      4,
+      0,
+      0,
+      1
+    ],
+    [
+      1,
+      1,
+      4,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      5,
+      0
+    ],
+    [
+      1,
+      0,
+      0,
+      0,
+      4
+    ]
+  ],
+  "classification_report": {
+    "document": {
+      "precision": 0.6666666666666666,
+      "recall": 0.8,
+      "f1-score": 0.7272727272727273,
+      "support": 5.0
+    },
+    "meeting": {
+      "precision": 0.8,
+      "recall": 0.8,
+      "f1-score": 0.8,
+      "support": 5.0
+    },
+    "other": {
+      "precision": 1.0,
+      "recall": 0.5714285714285714,
+      "f1-score": 0.7272727272727273,
+      "support": 7.0
+    },
+    "payment": {
+      "precision": 0.8333333333333334,
+      "recall": 1.0,
+      "f1-score": 0.9090909090909091,
+      "support": 5.0
+    },
+    "reply": {
+      "precision": 0.6666666666666666,
+      "recall": 0.8,
+      "f1-score": 0.7272727272727273,
+      "support": 5.0
+    },
+    "accuracy": 0.7777777777777778,
+    "macro avg": {
+      "precision": 0.7933333333333333,
+      "recall": 0.7942857142857143,
+      "f1-score": 0.7781818181818183,
+      "support": 27.0
+    },
+    "weighted avg": {
+      "precision": 0.8086419753086419,
+      "recall": 0.7777777777777778,
+      "f1-score": 0.7744107744107744,
+      "support": 27.0
+    }
+  },
+  "cases": [
+    {
+      "text": "The mobile phone bill needs payment by October 31",
+      "expected": "payment",
+      "predicted": "payment",
+      "passed": true
+    },
+    {
+      "text": "Don't forget the parking fine payment",
+      "expected": "payment",
+      "predicted": "payment",
+      "passed": true
+    },
+    {
+      "text": "Your electricity balance must be cleared by next Friday",
+      "expected": "payment",
+      "predicted": "payment",
+      "passed": true
+    },
+    {
+      "text": "Please book an appointment with the clinic",
+      "expected": "meeting",
+      "predicted": "meeting",
+      "passed": true
+    },
+    {
+      "text": "Can we arrange a video call tomorrow?",
+      "expected": "meeting",
+      "predicted": "meeting",
+      "passed": true
+    },
+    {
+      "text": "Confirm the upcoming dentist visit",
+      "expected": "meeting",
+      "predicted": "meeting",
+      "passed": true
+    },
+    {
+      "text": "Could you upload the completed paperwork?",
+      "expected": "document",
+      "predicted": "document",
+      "passed": true
+    },
+    {
+      "text": "Please send the signed PDF before Friday",
+      "expected": "document",
+      "predicted": "document",
+      "passed": true
+    },
+    {
+      "text": "I need the updated enrollment form",
+      "expected": "document",
+      "predicted": "document",
+      "passed": true
+    },
+    {
+      "text": "Please write back with your decision",
+      "expected": "reply",
+      "predicted": "reply",
+      "passed": true
+    },
+    {
+      "text": "Would you let me know whether this time works?",
+      "expected": "reply",
+      "predicted": "reply",
+      "passed": true
+    },
+    {
+      "text": "Can you respond to my last question?",
+      "expected": "reply",
+      "predicted": "reply",
+      "passed": true
+    },
+    {
+      "text": "Our weekly digest has arrived",
+      "expected": "other",
+      "predicted": "other",
+      "passed": true
+    },
+    {
+      "text": "The package has left our warehouse",
+      "expected": "other",
+      "predicted": "other",
+      "passed": true
+    },
+    {
+      "text": "Browse our newest seasonal offers",
+      "expected": "other",
+      "predicted": "other",
+      "passed": true
+    },
+    {
+      "text": "Please settle the remaining balance",
+      "expected": "payment",
+      "predicted": "payment",
+      "passed": true
+    },
+    {
+      "text": "The invoice deadline is approaching",
+      "expected": "payment",
+      "predicted": "payment",
+      "passed": true
+    },
+    {
+      "text": "Set up a conversation with the design team",
+      "expected": "meeting",
+      "predicted": "meeting",
+      "passed": true
+    },
+    {
+      "text": "Meet me to discuss the handoff",
+      "expected": "meeting",
+      "predicted": "reply",
+      "passed": false
+    },
+    {
+      "text": "Attach the compliance certificate",
+      "expected": "document",
+      "predicted": "document",
+      "passed": true
+    },
+    {
+      "text": "Please add your initials to this file",
+      "expected": "document",
+      "predicted": "reply",
+      "passed": false
+    },
+    {
+      "text": "Write me when you have a chance",
+      "expected": "reply",
+      "predicted": "reply",
+      "passed": true
+    },
+    {
+      "text": "Tell me whether the figures look right",
+      "expected": "reply",
+      "predicted": "document",
+      "passed": false
+    },
+    {
+      "text": "Our invoice was paid in full",
+      "expected": "other",
+      "predicted": "payment",
+      "passed": false
+    },
+    {
+      "text": "Your meeting notes are ready",
+      "expected": "other",
+      "predicted": "meeting",
+      "passed": false
+    },
+    {
+      "text": "The contract was signed yesterday",
+      "expected": "other",
+      "predicted": "document",
+      "passed": false
+    },
+    {
+      "text": "A new update has arrived",
+      "expected": "other",
+      "predicted": "other",
+      "passed": true
+    }
+  ],
+  "caveat": "This tiny synthetic author-held-out test is a development check, not representative real-world email accuracy or date-extraction performance."
+}
