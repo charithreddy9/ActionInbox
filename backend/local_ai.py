@@ -118,20 +118,52 @@ def _norm(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 def _chat(payload: dict) -> dict:
-    """Isolated loopback HTTP call; replaceable in unit tests."""
+    """Send structured data to local Ollama; expose safe diagnostic categories.
+
+    Never log or echo raw model errors: upstream messages can contain email text.
+    """
     req = Request(OLLAMA_URL + "/api/chat", data=json.dumps(payload).encode(),
                   headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urlopen(req, timeout=120) as response:
-            return json.loads(response.read(1_500_000).decode("utf-8"))
-    except (URLError, ConnectionError, TimeoutError, OSError) as exc:
-        raise LocalAIUnavailable(
-            "Cannot reach local Ollama. Start Ollama and run: ollama pull " + MODEL
-        ) from exc
+        # First model load and CPU inference may need more than two minutes.
+        with urlopen(req, timeout=240) as response:
+            data = json.loads(response.read(1_500_000).decode("utf-8"))
+            if not isinstance(data, dict):
+                raise LocalAIUnavailable("Ollama response was not a JSON object.")
+            return data
     except HTTPError as exc:
-        raise LocalAIUnavailable("Ollama returned an error. Check the installed model.") from exc
+        # HTTPError subclasses URLError; handle it FIRST or the cause is hidden.
+        code = exc.code
+        if code == 404:
+            message = f"Local Ollama model '{MODEL}' was not found. Run: ollama pull {MODEL}"
+        elif code in (400, 413, 422):
+            message = f"Ollama rejected the analysis request (HTTP {code}). Check your Ollama version and model compatibility."
+        elif code in (500, 502, 503, 504):
+            message = f"Ollama couldn't complete inference (HTTP {code}). Check available RAM and Ollama logs; try one short email."
+        else:
+            message = f"Ollama returned HTTP {code}; check the local Ollama installation."
+        raise LocalAIUnavailable(message) from exc
+    except (TimeoutError,) as exc:
+        raise LocalAIUnavailable(
+            "Local model inference timed out. Try one shorter email and check Ollama memory use."
+        ) from exc
+    except URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            raise LocalAIUnavailable(
+                "Local model inference timed out. Try one shorter email and check Ollama memory use."
+            ) from exc
+        raise LocalAIUnavailable(
+            "Cannot contact Ollama at 127.0.0.1:11434. Check that the Ollama service is running."
+        ) from exc
+    except (ConnectionError, OSError) as exc:
+        raise LocalAIUnavailable(
+            "Local Ollama connection failed. Check Ollama and try a single email."
+        ) from exc
     except (UnicodeError, json.JSONDecodeError) as exc:
-        raise LocalAIUnavailable("Ollama returned an unreadable response.") from exc
+        raise LocalAIUnavailable(
+            "Ollama returned unreadable JSON. Try a shorter email or another local model."
+        ) from exc
+
 
 def status() -> dict:
     req = Request(OLLAMA_URL + "/api/tags", method="GET")

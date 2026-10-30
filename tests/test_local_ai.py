@@ -85,3 +85,49 @@ def test_invalid_model_json_is_friendly(monkeypatch):
     monkeypatch.setattr(local_ai,"_chat",lambda payload:{"message":{"content":"not json"}})
     with pytest.raises(local_ai.LocalAIUnavailable):
         local_ai.analyze_emails([mail()])
+
+
+def test_ollama_http_400_has_useful_safe_error(monkeypatch):
+    from urllib.error import HTTPError
+    from io import BytesIO
+    def fail(*args, **kwargs):
+        # Upstream response deliberately includes secrets to ensure they aren't echoed.
+        raise HTTPError(local_ai.OLLAMA_URL + "/api/chat", 400, "Bad Request",
+                        {}, BytesIO(b"private email content"))
+    monkeypatch.setattr(local_ai,"urlopen",fail)
+    with pytest.raises(local_ai.LocalAIUnavailable, match=r"HTTP 400") as caught:
+        local_ai._chat({"model":local_ai.MODEL})
+    assert "private email" not in str(caught.value)
+    assert "Cannot reach" not in str(caught.value)
+
+def test_ollama_http_500_mentions_inference_not_connection(monkeypatch):
+    from urllib.error import HTTPError
+    from io import BytesIO
+    def fail(*args, **kwargs):
+        raise HTTPError(local_ai.OLLAMA_URL + "/api/chat", 500, "error",
+                        {}, BytesIO(b"private email content"))
+    monkeypatch.setattr(local_ai,"urlopen",fail)
+    with pytest.raises(local_ai.LocalAIUnavailable, match=r"inference \(HTTP 500\)"):
+        local_ai._chat({"model":local_ai.MODEL})
+
+def test_ollama_connection_error_is_distinct(monkeypatch):
+    from urllib.error import URLError
+    monkeypatch.setattr(local_ai,"urlopen",lambda *a,**kw: (_ for _ in ()).throw(
+        URLError("connection refused")))
+    with pytest.raises(local_ai.LocalAIUnavailable, match="Cannot contact Ollama"):
+        local_ai._chat({"model":local_ai.MODEL})
+
+def test_ollama_timeout_is_not_reported_as_missing_model(monkeypatch):
+    monkeypatch.setattr(local_ai,"urlopen",lambda *a,**kw: (_ for _ in ()).throw(
+        TimeoutError("timed out")))
+    with pytest.raises(local_ai.LocalAIUnavailable, match="timed out"):
+        local_ai._chat({"model":local_ai.MODEL})
+
+def test_ollama_response_data_is_returned(monkeypatch):
+    from io import BytesIO
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self,n):return b'{"message":{"content":"{}"}}'
+    monkeypatch.setattr(local_ai,"urlopen",lambda *a,**kw:Response())
+    assert local_ai._chat({"model":local_ai.MODEL})["message"]["content"]=="{}"

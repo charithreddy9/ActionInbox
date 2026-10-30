@@ -110,7 +110,7 @@ function App(){
         {gmailStatus?.connected&&<section className="panel">
           <h2>Local AI — Understand selected emails</h2>
           <p>Choose up to five emails below. A local Ollama language model reads the selected messages, extracts separate tasks and dates, groups related events and proposes editable tasks. No keyword category rules, external AI service, or automatic saving.</p>
-          <div className="radar-actions"><button className="secondary" onClick={refreshAI}>Check local AI</button><span>{aiStatus?.available?(aiStatus.model_installed?'Ready: ':'Model not installed: ')+aiStatus.model:'Ollama not running'}</span></div>
+          <div className="radar-actions"><button className="secondary" onClick={refreshAI}>Check local AI</button><span>{aiStatus?.available?(aiStatus.model_installed?'Installed (inference not yet verified): ':'Model not installed: ')+aiStatus.model:'Ollama not running'}</span></div>
           {!aiStatus?.available&&<p className="radar-empty">Start Ollama on this computer and install the model using <code>ollama pull qwen3:4b</code>.</p>}
           <p className="radar-empty">Selected: {selectedGmail.length}/5. First use Choose an email → Find emails to list candidates.</p>
           <button className="primary" disabled={aiBusy||!selectedGmail.length||!aiStatus?.model_installed} onClick={analyzeGmailWithAI}>{aiBusy?'Analyzing locally…':'Analyze selected emails with local AI'} <ArrowRight size={16}/></button>
