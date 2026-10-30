@@ -87,29 +87,51 @@ def _header(payload, name):
 
 
 class _HTMLText(HTMLParser):
+    """Extract visible text from untrusted HTML without rendering it."""
+    BLOCKS = {"p", "div", "br", "li", "tr", "td", "h1", "h2", "h3", "h4", "section"}
+    SKIP = {"head", "style", "script", "noscript", "svg"}
+
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.words = []
         self.skip = 0
 
     def handle_starttag(self, tag, attrs):
-        if tag in ("script", "style"):
+        if tag in self.SKIP:
             self.skip += 1
-        elif tag in ("div", "p", "br", "li"):
+        elif self.skip == 0 and tag in self.BLOCKS:
             self.words.append("\n")
 
     def handle_endtag(self, tag):
-        if tag in ("script", "style") and self.skip:
+        if tag in self.SKIP and self.skip:
             self.skip -= 1
-        elif tag in ("div", "p", "li"):
+        elif self.skip == 0 and tag in self.BLOCKS:
             self.words.append("\n")
 
     def handle_data(self, data):
-        if not self.skip:
+        if self.skip == 0:
             self.words.append(data)
 
     def text(self):
-        return "".join(self.words)
+        clean = "\n".join(
+            " ".join(line.split()) for line in "".join(self.words).splitlines()
+            if line.strip()
+        )
+        return clean
+
+
+def _looks_like_html(raw):
+    # Some Gmail MIME bodies are labelled text/plain yet contain full HTML.
+    return bool(re.search(
+        r"^\s*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b|<table\b|<div\b)",
+        raw[:400], re.I,
+    ) and re.search(r"</(?:html|body|table|div)>", raw, re.I))
+
+
+def _visible_html(raw):
+    parser = _HTMLText()
+    parser.feed(raw)
+    return parser.text()
 
 
 def _decode(data):
@@ -134,12 +156,10 @@ def extract_body(payload):
                 walk(child)
             return
         raw = _decode(part.get("body", {}).get("data", ""))
-        if content_type == "text/plain":
+        if content_type == "text/html" or _looks_like_html(raw):
+            html.append(_visible_html(raw))
+        elif content_type == "text/plain" or (not content_type and raw):
             plain.append(raw)
-        elif content_type == "text/html":
-            parser = _HTMLText()
-            parser.feed(raw)
-            html.append(parser.text())
         for child in part.get("parts", []):
             walk(child)
 
@@ -181,6 +201,17 @@ def list_messages(query="in:inbox newer_than:14d", limit=10):
         raise GmailUnavailable("Couldn't list Gmail messages. Check your connection and Gmail API setup.") from exc
 
 
+def _date_from_header(header):
+    """Interpret 'tomorrow' relative to when the sender wrote the email."""
+    if not header:
+        return None
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(header).date().isoformat()
+    except (ValueError, TypeError, OverflowError, IndexError):
+        return None
+
+
 def get_message(message_id):
     message_id = _validate_id(message_id)
     try:
@@ -193,6 +224,7 @@ def get_message(message_id):
             "subject": _header(payload, "Subject") or "(No subject)",
             "sender": _header(payload, "From"),
             "date": _header(payload, "Date"),
+            "reference_date": _date_from_header(_header(payload, "Date")),
             "body": body,
             "has_text": bool(body.strip()),
             "not_saved": True,

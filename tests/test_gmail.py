@@ -47,3 +47,47 @@ def test_metadata_before_message_body(monkeypatch):
     result=client.get("/api/gmail/messages/abcdef0123456789").json()
     assert "Please send" in result["body"]
     assert [c.get("format") for c in calls if "format" in c]==["metadata","full"]
+
+
+def test_html_only_message_contains_visible_charge_and_not_markup():
+    html=('<!doctype html><html><head><style>div {color:red}</style></head>'
+          '<body><div>As a reminder, your Gold free trial ends tomorrow. '
+          'You’ll be charged $5/month to your brokerage account when your free trial ends.</div>'
+          '<table><tr><td>Other content</td></tr></table></body></html>')
+    parsed=gmail.extract_body({"mimeType":"text/html","body":{"data":b64(html)}})
+    assert "Gold free trial ends tomorrow" in parsed
+    assert "$5/month" in parsed
+    assert "<html" not in parsed
+    assert "{color:red}" not in parsed
+
+
+def test_mislabelled_html_plain_body_is_cleaned():
+    html='<!doctype html><html><body><div>Your Gold free trial ends tomorrow.</div></body></html>'
+    parsed=gmail.extract_body({"mimeType":"text/plain","body":{"data":b64(html)}})
+    assert "trial ends tomorrow" in parsed
+    assert "<div" not in parsed
+
+
+def test_sent_date_is_not_todays_date():
+    assert gmail._date_from_header("Thu, 29 Oct 2026 21:42:46 -0700")=="2026-10-29"
+    assert gmail._date_from_header("invalid date") is None
+
+
+def test_gmail_message_exposes_reference_date(monkeypatch):
+    class Req:
+        def execute(self):
+            return {"payload":{"mimeType":"text/html","headers":[
+                {"name":"Subject","value":"Your free trial is ending"},
+                {"name":"Date","value":"Thu, 29 Oct 2026 20:00:00 -0400"}],
+                "body":{"data":b64("<html><body>Trial ends tomorrow.</body></html>")}}}
+    class Msg:
+        def get(self,**kw):return Req()
+    class Users:
+        def messages(self):return Msg()
+    class Service:
+        def users(self):return Users()
+    monkeypatch.setattr(gmail,"_service",lambda:Service())
+    result=TestClient(api.app).get("/api/gmail/messages/abcdef0123456789").json()
+    assert result["reference_date"]=="2026-10-29"
+    assert "Trial ends tomorrow." in result["body"]
+    assert "<html" not in result["body"]

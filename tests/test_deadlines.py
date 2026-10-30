@@ -109,3 +109,14 @@ def test_trial_offer_not_confused_with_genuine_ending_notice():
 
 def test_real_subscription_notice_still_detected():
     assert notice_kind("Your streaming subscription will renew", "Your plan renews soon.") == "subscription"
+
+
+def test_robinhood_trial_deadline_from_sender_date():
+    text=("As a reminder, your Gold free trial ends tomorrow. "
+          "You’ll be charged $5/month to your brokerage account when your free trial ends.")
+    from backend.deadlines import deadline_hints
+    matches=deadline_hints("Your free trial is ending",text,
+                           "Thu, 29 Oct 2026 20:00:00 -0400",TODAY)
+    assert len(matches)==1
+    assert matches[0]["type"]=="trial"
+    assert matches[0]["due_date"]=="2026-10-30"
