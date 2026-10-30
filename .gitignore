@@ -7,3 +7,10 @@ frontend/dist/
 data/
 .env
 .DS_Store
+
+# Google OAuth secrets stay on your computer
+credentials.json
+client_secret*.json
+token.json
+.gmail-token.json
+.gmail/

@@ -16,33 +16,40 @@ function App(){
   const [review,setReview]=useState(null),[drafts,setDrafts]=useState([]),[tasks,setTasks]=useState([]),[evaluation,setEvaluation]=useState(null);
   const [running,setRunning]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState(''),[filter,setFilter]=useState('active'),[search,setSearch]=useState('');
   const [saving,setSaving]=useState('');
+  const [gmailStatus,setGmailStatus]=useState(null),[gmailQuery,setGmailQuery]=useState('in:inbox newer_than:14d'),[gmailRows,setGmailRows]=useState([]),[gmailMessage,setGmailMessage]=useState(null),[gmailBusy,setGmailBusy]=useState(false),[gmailSubject,setGmailSubject]=useState('');
+  async function refreshGmail(){try{setGmailStatus(await api('/gmail/status'))}catch(e){setError(e.message)}}
+  async function loadGmail(){setGmailBusy(true);setGmailMessage(null);setError('');try{const r=await api('/gmail/messages?'+new URLSearchParams({q:gmailQuery,limit:'10'}));setGmailRows(r.messages);flash('Loaded '+r.count+' email headers. No email body was loaded.')}catch(e){setError(e.message)}finally{setGmailBusy(false)}}
+  async function pickGmail(id){setGmailBusy(true);setError('');try{setGmailMessage(await api('/gmail/messages/'+encodeURIComponent(id)))}catch(e){setError(e.message)}finally{setGmailBusy(false)}}
+  function useGmailMessage(){if(!gmailMessage?.has_text)return;setText(gmailMessage.body);setGmailSubject(gmailMessage.subject);setFormat('text');setReview(null);setDrafts([]);setTab('analyze');flash('Email loaded for local analysis. Nothing has been saved.')}
+
   function flash(msg){setNotice(msg);setError('')}
   async function refresh(){try{setTasks(await api('/tasks'))}catch(e){setError(e.message)}}
-  useEffect(()=>{refresh();api('/evaluation').then(setEvaluation).catch(()=>{})},[]);
+  useEffect(()=>{refresh();api('/evaluation').then(setEvaluation).catch(()=>{});refreshGmail()},[]);
   const active=tasks.filter(t=>!t.done);const completed=tasks.filter(t=>t.done);
   const high=active.filter(t=>t.priority==='high').length;
   const near=active.filter(t=>t.due_date&& (Date.parse(t.due_date+'T23:59:59')-Date.now())<7*86400000).length;
   const visible=useMemo(()=>tasks.filter(t=>(filter==='all'||(filter==='active'?!t.done:t.done))&&((t.title+' '+t.subject+' '+t.category).toLowerCase().includes(search.toLowerCase()))),[tasks,filter,search]);
-  async function analyze(){setRunning(true);setError('');setNotice('');try{const input=text.startsWith('Subject:')&&format==='text'?text.replace(/^Subject:[^\n]*\n\n?/,''):text;const result=await api('/analyze',{method:'POST',body:JSON.stringify({text:input,format})});setReview(result);setDrafts(result.suggestions);flash(result.suggestions.length?`Found ${result.suggestions.length} possible ${result.suggestions.length===1?'task':'tasks'}. Review each one before saving.`:'No clear action requests found. Nothing was added.')}catch(e){setError(e.message)}finally{setRunning(false)}}
+  async function analyze(){setRunning(true);setError('');setNotice('');try{const input=text.startsWith('Subject:')&&format==='text'?text.replace(/^Subject:[^\n]*\n\n?/,''):text;const result=await api('/analyze',{method:'POST',body:JSON.stringify({text:input,format,subject:gmailSubject})});setReview(result);setDrafts(result.suggestions);flash(result.suggestions.length?`Found ${result.suggestions.length} possible ${result.suggestions.length===1?'task':'tasks'}. Review each one before saving.`:'No clear action requests found. Nothing was added.')}catch(e){setError(e.message)}finally{setRunning(false)}}
   function updateDraft(i,field,value){setDrafts(list=>list.map((d,k)=>k===i?{...d,[field]:value}:d))}
   async function approve(i){const d=drafts[i];setSaving(d.id);setError('');try{await api('/tasks',{method:'POST',body:JSON.stringify({id:d.id,message_hash:d.message_hash,title:d.title,source_excerpt:d.source_excerpt,subject:d.subject,category:d.category,priority:d.priority,due_date:d.due_date||null})});setDrafts(list=>list.filter((_,k)=>k!==i));await refresh();flash('Task saved. You can edit or complete it from the task board.')}catch(e){setError(e.message)}finally{setSaving('')}}
   async function toggle(t){try{await api('/tasks/'+t.id,{method:'PATCH',body:JSON.stringify({done:!t.done})});await refresh()}catch(e){setError(e.message)}}
   async function remove(t){if(!window.confirm('Remove this task?'))return;try{await api('/tasks/'+t.id,{method:'DELETE'});await refresh()}catch(e){setError(e.message)}}
   async function changeTask(t,field,value){try{await api('/tasks/'+t.id,{method:'PATCH',body:JSON.stringify({[field]:value})});await refresh()}catch(e){setError(e.message)}}
-  async function readFile(e){const f=e.target.files?.[0];if(!f)return;setError('');if(f.size>32000){setError('Maximum email size is 32 KB for this version.');return;}if(!/\.(eml|txt)$/i.test(f.name)){setError('Only .eml or .txt files are supported.');return;}setText(await f.text());setFormat(/\.eml$/i.test(f.name)?'eml':'text');setReview(null);setDrafts([]);flash(`Loaded ${f.name}. Nothing has been saved.`);e.target.value=''}
+  async function readFile(e){const f=e.target.files?.[0];if(!f)return;setError('');if(f.size>32000){setError('Maximum email size is 32 KB for this version.');return;}if(!/\.(eml|txt)$/i.test(f.name)){setError('Only .eml or .txt files are supported.');return;}setText(await f.text());setGmailSubject('');setFormat(/\.eml$/i.test(f.name)?'eml':'text');setReview(null);setDrafts([]);flash(`Loaded ${f.name}. Nothing has been saved.`);e.target.value=''}
   function exportCsv(){const cols=['title','category','priority','due_date','done','subject','source_excerpt'];const escape=x=>'"'+String(x??'').replaceAll('"','""')+'"';const csv=[cols.join(','),...tasks.map(t=>cols.map(c=>escape(t[c])).join(','))].join('\r\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='actioninbox-tasks.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-icon"><Layers size={21}/></div><div><strong>ActionInbox<span>.</span></strong><small>YOUR QUIETER WORKDAY</small></div></div>
       <div className="nav-label">WORKSPACE</div>
       <button className={'nav-link '+(tab==='analyze'?'selected':'')} onClick={()=>setTab('analyze')}><Inbox size={19}/> Inbox assistant <ChevronRight size={16} className="nav-arrow"/></button>
+      <button className={'nav-link '+(tab==='gmail'?'selected':'')} onClick={()=>{setTab('gmail');refreshGmail()}}><Mail size={19}/> Gmail (optional) <ChevronRight size={16} className="nav-arrow"/></button>
       <button className={'nav-link '+(tab==='tasks'?'selected':'')} onClick={()=>setTab('tasks')}><ClipboardList size={19}/> My task board <span className="nav-count">{active.length}</span></button>
       <button className={'nav-link '+(tab==='evaluation'?'selected':'')} onClick={()=>setTab('evaluation')}><FlaskConical size={19}/> ML evaluation</button>
       <div className="sidebar-spacer"/>
-      <div className="privacy"><ShieldCheck size={21}/><strong>Private by default</strong><p>No inbox connection. Messages stay in this local app, and suggested tasks are saved only if you approve them.</p><span>LOCAL-FIRST · NO PAID API</span></div>
+      <div className="privacy"><ShieldCheck size={21}/><strong>Private by default</strong><p>Gmail is optional and read-only. Messages are loaded only on request; tasks are saved only after approval.</p><span>LOCAL-FIRST · NO PAID API</span></div>
       <div className="aside-footer">Built to make busy inboxes feel simpler.</div>
     </aside>
-    <main className="main"><div className="top"><div><span className="top-dot"/> LOCAL WORKSPACE</div><span className="top-right"><ShieldCheck size={14}/> Nothing sent to cloud AI</span></div>
+    <main className="main"><div className="top"><div><span className="top-dot"/> LOCAL WORKSPACE</div><span className="top-right"><ShieldCheck size={14}/> No paid cloud AI calls</span></div>
       {notice&&<div role="status" className="message success"><CheckCircle2 size={17}/>{notice}<button onClick={()=>setNotice('')}>×</button></div>}
       {error&&<div role="alert" className="message fail"><AlertTriangle size={17}/>{error}<button onClick={()=>setError('')}>×</button></div>}
       {tab==='analyze'&&<div className="content">
@@ -52,7 +59,7 @@ function App(){
         <div className="stats"><div className="stat"><span>OPEN TASKS</span><strong>{active.length.toString().padStart(2,'0')}</strong><small>Ready when you are</small></div><div className="stat"><span>UPCOMING / OVERDUE</span><strong>{near.toString().padStart(2,'0')}</strong><small>Within 7 days or past due</small></div><div className="stat"><span>COMPLETED</span><strong>{completed.length.toString().padStart(2,'0')}</strong><small>Every little win counts</small></div></div>
         <section className="panel"><div className="panel-heading"><div><div className="number">01</div><h2>Bring in a message</h2><p>Paste email text, or import a small .eml / .txt file.</p></div><label className="upload-btn"><FileUp size={17}/> Import file<input type="file" accept=".eml,.txt,text/plain,message/rfc822" onChange={readFile}/></label></div>
           <label className="field-label" htmlFor="email">MESSAGE CONTENT</label>
-          <textarea id="email" spellCheck="false" value={text} onChange={e=>{setText(e.target.value);setFormat('text')}} placeholder="Paste a message asking you to do something…" maxLength={32000}/>
+          <textarea id="email" spellCheck="false" value={text} onChange={e=>{setText(e.target.value);setGmailSubject('');setFormat('text')}} placeholder="Paste a message asking you to do something…" maxLength={32000}/>
           <div className="panel-actions"><span><ShieldCheck size={15}/> We analyze the text on your computer. Nothing is saved yet.</span><button className="primary" onClick={analyze} disabled={running||!text.trim()}>{running?'Looking for actions…':'Find action items'} <ArrowRight size={17}/></button></div>
         </section>
         {review&&<section className="panel suggestions"><div className="panel-heading"><div><div className="number">02</div><h2>Review what we found</h2><p>These are suggestions, not automatic decisions. Correct anything that looks off.</p></div><span className="pill">{drafts.length} TO REVIEW</span></div>
@@ -62,6 +69,23 @@ function App(){
              <div className="suggest-footer"><span><ShieldCheck size={14}/> {d.reasons.join(' · ')} · Model score is not correctness probability</span><div><button className="quiet" onClick={()=>setDrafts(list=>list.filter((_,k)=>k!==i))}>Dismiss</button><button className="approve" disabled={saving===d.id||d.title.trim().length<2} onClick={()=>approve(i)}><Plus size={16}/> {saving===d.id?'Saving…':'Approve task'}</button></div></div></article>)}
         </section>}
         <div className="hint"><div><Mail size={19}/><strong>Start with the example above.</strong></div><p>It includes three separate requests. Try changing the wording or adding deadlines to see how the extraction behaves. For real emails, review everything before approving.</p></div>
+      </div>}
+      {tab==='gmail'&&<div className="content">
+        <div className="eyebrow"><span className="tiny-line"/> OPTIONAL GMAIL CONNECTION</div>
+        <h1>Your email, <em>your choice.</em></h1>
+        <p className="lead">Read-only Gmail access on your own computer. No background inbox scans and no automatic task saving.</p>
+        <section className="panel">
+          <h2>Connection</h2>
+          <p>{gmailStatus?.connected?'A local OAuth token is present.':'Gmail is not connected. Follow the setup guide and authorize through Google in your browser.'}</p>
+          <p><a className="gmail-guide" href="https://github.com/charithreddy9/ActionInbox/blob/feature/gmail-readonly/GMAIL_SETUP.md" target="_blank" rel="noreferrer">Gmail setup instructions</a></p>
+          <button className="secondary" onClick={refreshGmail}><RotateCcw size={15}/> Refresh status</button>
+        </section>
+        {gmailStatus?.connected&&<section className="panel">
+          <h2>Choose an email</h2><p>Search up to 10 emails. First we load only their subjects, senders, and dates.</p>
+          <div className="gmail-search"><input aria-label="Gmail search query" value={gmailQuery} maxLength={120} onChange={e=>setGmailQuery(e.target.value)}/><button className="primary" disabled={gmailBusy} onClick={loadGmail}>{gmailBusy?'Loading…':'Find emails'}</button></div>
+          <div className="gmail-results">{gmailRows.map(m=><button key={m.id} onClick={()=>pickGmail(m.id)} disabled={gmailBusy}><strong>{m.subject}</strong><span>{m.sender} · {m.date}</span></button>)}</div>
+          {gmailMessage&&<div className="gmail-preview"><h3>{gmailMessage.subject}</h3><p>{gmailMessage.sender}</p><pre>{gmailMessage.body||'No readable text body.'}</pre><button className="primary" onClick={useGmailMessage} disabled={!gmailMessage.has_text}>Analyze this email <ArrowRight size={16}/></button></div>}
+        </section>}
       </div>}
       {tab==='tasks'&&<div className="content"><div className="eyebrow"><span className="tiny-line"/> YOUR WORK IN ONE PLACE</div><h1>Less scrolling. <em>More progress.</em></h1><p className="lead">Only tasks you've explicitly approved appear here. You can mark them complete, edit them, or export a copy.</p>
         <div className="board-head"><div className="seg">{[['active','Open'],['done','Completed'],['all','All tasks']].map(([k,label])=><button key={k} className={filter===k?'active':''} onClick={()=>setFilter(k)}>{label}</button>)}</div><div className="board-actions"><label className="search"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Find a task"/></label><button className="export" onClick={exportCsv} disabled={!tasks.length}><Download size={16}/> Export CSV</button></div></div>
