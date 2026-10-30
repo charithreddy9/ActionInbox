@@ -322,49 +322,123 @@ def scan_deadlines(limit=20):
     except GmailUnavailable:raise
     except Exception as exc:raise GmailUnavailable("Deadline scan failed. Check your Gmail connection.") from exc
 
-def scan_smart_inbox(limit=20):
-    """On-demand scan, balanced searches, no persistence."""
-    from .deadlines import deadline_hints,notice_kind,sort_items
+def _gmail_error_code(exc):
+    """Safe diagnostic only: never expose Gmail response bodies or credentials."""
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    return f"HTTP {status}" if isinstance(status, int) else type(exc).__name__
+
+
+def _execute_gmail_request(make_request):
+    """Retry temporary Google API throttling without logging mailbox content."""
+    import time
+    for attempt in range(3):
+        try:
+            return make_request().execute()
+        except Exception as exc:
+            status = getattr(getattr(exc, "resp", None), "status", None)
+            if status in (429, 500, 502, 503, 504) and attempt < 2:
+                time.sleep((attempt + 1) * 0.75)
+                continue
+            raise
+
+
+SMART_QUERIES = {
+    "payment": 'newer_than:180d {invoice "payment due" "bill due" "amount due" billing}',
+    "subscription": 'newer_than:180d {subscription renewal renews "auto renew"}',
+    "trial": 'newer_than:180d {"trial ends" "trial expires" "free trial" "trial ending"}',
+    "travel": 'newer_than:90d {"pickup reminder" "luggage pickup" "baggage pickup" "drop off" lugless}',
+    "flight": 'newer_than:90d {"flight check-in" "boarding pass" "flight reminder" "departure reminder"}',
+    "appointment": 'newer_than:90d {"appointment reminder" "appointment confirmed" "meeting reminder" "interview scheduled"}',
+    "delivery": 'newer_than:90d {"ready for pickup" "pick up your package" "collect your package" "locker expires"}',
+    "document": 'newer_than:90d {"submission deadline" "submit by" "upload your document" "application deadline"}',
+}
+
+
+def scan_smart_inbox(limit=20, category="all"):
+    """Explicit, bounded Gmail search. A single failing request does not erase results.
+
+    All-category scans cap each category at 10 messages to avoid rapid API bursts.
+    A focused category scan can examine up to 25 matching messages.
+    """
+    from .deadlines import deadline_hints, notice_kind, sort_items
     from .reminders import reminder_hints
-    if not 1<=limit<=25:raise GmailUnavailable("Limit must be 1-25")
-    queries={
-      "payment":'newer_than:180d {invoice "payment due" "bill due" "amount due" billing}',
-      "subscription":'newer_than:180d {subscription renewal renews "auto renew"}',
-      "trial":'newer_than:180d {"trial ends" "trial expires" "free trial" "trial ending"}',
-      "travel":'newer_than:90d {"pickup reminder" "luggage pickup" "baggage pickup" "drop off" lugless}',
-      "flight":'newer_than:90d {"flight check-in" "boarding pass" "flight reminder" "departure reminder"}',
-      "appointment":'newer_than:90d {"appointment reminder" "appointment confirmed" "meeting reminder" "interview scheduled"}',
-      "delivery":'newer_than:90d {"ready for pickup" "pick up your package" "collect your package" "locker expires"}',
-      "document":'newer_than:90d {"submission deadline" "submit by" "upload your document" "application deadline"}',
-    }
-    try:
-        svc=_service()
-        ids=[];counts={}
-        for kind,query in queries.items():
-            data=svc.users().messages().list(userId="me",q=query,maxResults=limit,includeSpamTrash=False).execute()
-            matches=[_validate_id(entry["id"]) for entry in data.get("messages",[])]
-            counts[kind]=len(matches)
-            ids.extend(matches)
-        ids=list(dict.fromkeys(ids))[:limit*len(queries)]
-        dated=[];undated=[]
-        for message_id in ids:
-            message=svc.users().messages().get(userId="me",id=message_id,format="full").execute()
-            payload=message.get("payload") or {}
-            subject=_header(payload,"Subject") or "(No subject)"
-            sender=_header(payload,"From");sent=_header(payload,"Date")
-            body=extract_body(payload)
-            finance=deadline_hints(subject,body,sent)
-            other,other_kind=reminder_hints(subject,body,sent)
-            # Prefer the more specific financial or logistical analysis, not both.
-            hints=finance or other
+    import time
+
+    if not 1 <= limit <= 25:
+        raise GmailUnavailable("Choose a scan limit between 1 and 25.")
+    if category != "all" and category not in SMART_QUERIES:
+        raise GmailUnavailable("Unknown reminder category.")
+    actual_limit = min(limit, 10) if category == "all" else limit
+    queries = SMART_QUERIES if category == "all" else {category: SMART_QUERIES[category]}
+
+    service = _service()  # If OAuth is invalid, report that separately.
+    ids = []
+    counts = {}
+    errors = []
+    seen = set()
+    for kind, query in queries.items():
+        try:
+            response = _execute_gmail_request(lambda q=query: service.users().messages().list(
+                userId="me", q=q, maxResults=actual_limit, includeSpamTrash=False
+            ))
+            found = response.get("messages", [])
+            counts[kind] = len(found)
+            for entry in found:
+                try:
+                    message_id = _validate_id(entry["id"])
+                except (GmailUnavailable, KeyError, TypeError):
+                    errors.append({"category": kind, "stage": "message-id", "code": "Invalid ID"})
+                    continue
+                if message_id not in seen:
+                    seen.add(message_id)
+                    ids.append(message_id)
+        except Exception as exc:
+            errors.append({"category": kind, "stage": "search", "code": _gmail_error_code(exc)})
+            counts[kind] = 0
+
+    if errors and not ids and len(errors) >= len(queries):
+        codes = ", ".join(sorted(set(e["code"] for e in errors)))
+        raise GmailUnavailable(f"Gmail search failed ({codes}). If this persists, check Google authorization and API quotas.")
+
+    dated = []
+    undated = []
+    scanned = 0
+    for message_id in ids:
+        try:
+            # Reduce per-second Gmail API usage during a broad scan.
+            time.sleep(0.12)
+            message = _execute_gmail_request(lambda mid=message_id: service.users().messages().get(
+                userId="me", id=mid, format="full"
+            ))
+            payload = message.get("payload") or {}
+            subject = _header(payload, "Subject") or "(No subject)"
+            sender = _header(payload, "From")
+            sent = _header(payload, "Date")
+            body = extract_body(payload)
+            finance = deadline_hints(subject, body, sent)
+            other, other_kind = reminder_hints(subject, body, sent)
+            hints = finance or other
             for hint in hints:
-                dated.append({"message_id":message_id,"subject":subject,"sender":sender,**hint})
+                dated.append({"message_id": message_id, "subject": subject, "sender": sender, **hint})
             if not hints:
-                kind=notice_kind(subject,body) or other_kind
+                kind = notice_kind(subject, body) or other_kind
                 if kind:
-                    undated.append({"message_id":message_id,"subject":subject,"sender":sender,"type":kind})
-        return {"items":sort_items(dated),"undated":undated[:50],"scanned":len(ids),
-           "searched_categories":counts,"saved":False,
-           "notice":"Potential reminders, not verified obligations. Check the original email."}
-    except GmailUnavailable:raise
-    except Exception as exc:raise GmailUnavailable("Smart Inbox scan failed. Verify Gmail connection.") from exc
+                    undated.append({"message_id": message_id, "subject": subject, "sender": sender, "type": kind})
+            scanned += 1
+        except Exception as exc:
+            # No message bodies/IDs in errors, and no automatic task creation.
+            errors.append({"category": "message", "stage": "read/analyze", "code": _gmail_error_code(exc)})
+            continue
+
+    if errors and not scanned:
+        codes = ", ".join(sorted(set(e["code"] for e in errors)))
+        raise GmailUnavailable(f"Could not scan Gmail messages ({codes}). Try a focused category scan.")
+
+    return {
+        "items": sort_items(dated), "undated": undated[:50],
+        "scanned": scanned, "matched_message_ids": len(ids),
+        "searched_categories": counts, "scope": category,
+        "limit_per_category": actual_limit, "errors": errors[:20],
+        "partial": bool(errors), "saved": False,
+        "notice": "Possible reminders only, not verified obligations. Review the source email.",
+    }
