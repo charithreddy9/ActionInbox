@@ -31,7 +31,132 @@ class TaskIn(BaseModel):
     title:str=Field(min_length=2,max_length=180)
     source_excerpt:str=Field(min_length=1,max_length=350)
     subject:str=Field(default='',max_length=180)
-    category:Literal['payment','meeting','document','reply','other']
+    category:str=Field(min_length=2,max_length=40,pattern=r'^[a-z0-9_]+    priority:Literal['normal','medium','high']='normal'
+    due_date:date|None=None
+class TaskEdit(BaseModel):
+    title:str|None=Field(default=None,min_length=2,max_length=180)
+    due_date:date|None=None
+    category:str|None=Field(default=None,min_length=2,max_length=40,pattern=r'^[a-z0-9_]+
+    priority:Literal['normal','medium','high']|None=None
+    done:bool|None=None
+
+@contextmanager
+def connection():
+    DB_PATH.parent.mkdir(parents=True,exist_ok=True)
+    db=sqlite3.connect(DB_PATH,timeout=5)
+    db.row_factory=sqlite3.Row
+    try:
+        db.execute('''CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY,message_hash TEXT NOT NULL,title TEXT NOT NULL,
+          source_excerpt TEXT NOT NULL,subject TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL,priority TEXT NOT NULL,due_date TEXT,
+          done INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL
+        )''')
+        db.commit()
+        yield db
+        db.commit()
+    finally:db.close()
+
+def load_task(row):
+    obj=dict(row);obj['done']=bool(obj['done']);return obj
+
+@app.get('/api/health')
+def health():return {'ok':True,'mode':'local-first','paid_ai':False,'remote_email_access':False}
+
+@app.post('/api/analyze')
+def do_analyze(message:MessageIn):
+    try:return analyze(message.text,message.format,message.reference_date, subject_override=message.subject if message.subject else None)
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+
+@app.get('/api/tasks')
+def get_tasks():
+    with connection() as db:
+        rows=db.execute('SELECT * FROM tasks ORDER BY done ASC, CASE priority WHEN "high" THEN 0 WHEN "medium" THEN 1 ELSE 2 END, due_date IS NULL ASC, due_date ASC,created_at DESC').fetchall()
+    return [load_task(r) for r in rows]
+
+@app.post('/api/tasks',status_code=201)
+def save_task(task:TaskIn):
+    # A suggestion is never saved until the user clicks Approve. Original email is not persisted.
+    with connection() as db:
+        try:
+            db.execute('''INSERT INTO tasks (id,message_hash,title,source_excerpt,subject,category,priority,due_date,created_at)
+                  VALUES (?,?,?,?,?,?,?,?,?)''',(task.id,task.message_hash,task.title,task.source_excerpt,task.subject,task.category,task.priority,
+                  str(task.due_date) if task.due_date else None,datetime.now(timezone.utc).isoformat()))
+        except sqlite3.IntegrityError:raise HTTPException(409,'This suggestion was already added.')
+        row=db.execute('SELECT * FROM tasks WHERE id=?',(task.id,)).fetchone()
+    return load_task(row)
+
+@app.patch('/api/tasks/{task_id}')
+def edit_task(task_id:str,change:TaskEdit):
+    changes=change.model_dump(exclude_unset=True)
+    if not changes:raise HTTPException(400,'No changes supplied.')
+    fields=[];values=[]
+    for key,value in changes.items():
+        fields.append(f'{key}=?')
+        values.append(int(value) if key=='done' and value is not None else str(value) if key=='due_date' and value else value)
+    with connection() as db:
+        result=db.execute(f'UPDATE tasks SET {", ".join(fields)} WHERE id=?',values+[task_id])
+        if result.rowcount==0:raise HTTPException(404,'Task not found.')
+        row=db.execute('SELECT * FROM tasks WHERE id=?',(task_id,)).fetchone()
+    return load_task(row)
+
+@app.delete('/api/tasks/{task_id}')
+def delete_task(task_id:str):
+    with connection() as db:
+        result=db.execute('DELETE FROM tasks WHERE id=?',(task_id,))
+        if result.rowcount==0:raise HTTPException(404,'Task not found.')
+    return {'deleted':True}
+
+@app.get('/api/evaluation')
+def evaluation():
+    p=ROOT/'research'/'evaluation.json'
+    if not p.exists():raise HTTPException(404,'Run python -m backend.evaluate to generate the evaluation report.')
+    return json.loads(p.read_text(encoding='utf-8'))
+
+@app.get('/')
+def home():
+    index=ROOT/'frontend'/'dist'/'index.html'
+    if index.exists():return FileResponse(index)
+    return {'app':'ActionInbox','frontend':'Run npm run dev in frontend/','api_docs':'/api/docs'}
+
+# Single-service hosting is possible, but authentication must be implemented first.
+# No general catch-all static mount here to avoid exposing private files on local disk.
+
+# Opt-in Gmail integration: read-only access, manual message selection,
+# and no background synchronization. Never log OAuth tokens or full email text.
+@app.get('/api/gmail/status')
+def gmail_status():
+    from .gmail import connection_status
+    return connection_status()
+
+@app.get('/api/gmail/messages')
+def gmail_messages(q: str = 'in:inbox newer_than:14d', limit: int = 10):
+    from .gmail import GmailUnavailable, list_messages
+    try:
+        return list_messages(q, limit)
+    except GmailUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+@app.get('/api/gmail/messages/{message_id}')
+def gmail_message(message_id: str):
+    from .gmail import GmailUnavailable, get_message
+    try:
+        return get_message(message_id)
+    except GmailUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+@app.get('/api/gmail/deadlines')
+def gmail_deadlines(limit:int=20):
+    from .gmail import GmailUnavailable,scan_deadlines
+    try:return scan_deadlines(limit)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+
+@app.get('/api/gmail/smart-radar')
+def gmail_smart_radar(limit:int=20, category:str="all"):
+    from .gmail import GmailUnavailable,scan_smart_inbox
+    try:return scan_smart_inbox(limit,category)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+)
     priority:Literal['normal','medium','high']='normal'
     due_date:date|None=None
 class TaskEdit(BaseModel):
@@ -157,3 +282,291 @@ def gmail_smart_radar(limit:int=20, category:str="all"):
     from .gmail import GmailUnavailable,scan_smart_inbox
     try:return scan_smart_inbox(limit,category)
     except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+)
+    priority:Literal['normal','medium','high']|None=None
+    done:bool|None=None
+
+@contextmanager
+def connection():
+    DB_PATH.parent.mkdir(parents=True,exist_ok=True)
+    db=sqlite3.connect(DB_PATH,timeout=5)
+    db.row_factory=sqlite3.Row
+    try:
+        db.execute('''CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY,message_hash TEXT NOT NULL,title TEXT NOT NULL,
+          source_excerpt TEXT NOT NULL,subject TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL,priority TEXT NOT NULL,due_date TEXT,
+          done INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL
+        )''')
+        db.commit()
+        yield db
+        db.commit()
+    finally:db.close()
+
+def load_task(row):
+    obj=dict(row);obj['done']=bool(obj['done']);return obj
+
+@app.get('/api/health')
+def health():return {'ok':True,'mode':'local-first','paid_ai':False,'remote_email_access':False}
+
+@app.post('/api/analyze')
+def do_analyze(message:MessageIn):
+    try:return analyze(message.text,message.format,message.reference_date, subject_override=message.subject if message.subject else None)
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+
+@app.get('/api/tasks')
+def get_tasks():
+    with connection() as db:
+        rows=db.execute('SELECT * FROM tasks ORDER BY done ASC, CASE priority WHEN "high" THEN 0 WHEN "medium" THEN 1 ELSE 2 END, due_date IS NULL ASC, due_date ASC,created_at DESC').fetchall()
+    return [load_task(r) for r in rows]
+
+@app.post('/api/tasks',status_code=201)
+def save_task(task:TaskIn):
+    # A suggestion is never saved until the user clicks Approve. Original email is not persisted.
+    with connection() as db:
+        try:
+            db.execute('''INSERT INTO tasks (id,message_hash,title,source_excerpt,subject,category,priority,due_date,created_at)
+                  VALUES (?,?,?,?,?,?,?,?,?)''',(task.id,task.message_hash,task.title,task.source_excerpt,task.subject,task.category,task.priority,
+                  str(task.due_date) if task.due_date else None,datetime.now(timezone.utc).isoformat()))
+        except sqlite3.IntegrityError:raise HTTPException(409,'This suggestion was already added.')
+        row=db.execute('SELECT * FROM tasks WHERE id=?',(task.id,)).fetchone()
+    return load_task(row)
+
+@app.patch('/api/tasks/{task_id}')
+def edit_task(task_id:str,change:TaskEdit):
+    changes=change.model_dump(exclude_unset=True)
+    if not changes:raise HTTPException(400,'No changes supplied.')
+    fields=[];values=[]
+    for key,value in changes.items():
+        fields.append(f'{key}=?')
+        values.append(int(value) if key=='done' and value is not None else str(value) if key=='due_date' and value else value)
+    with connection() as db:
+        result=db.execute(f'UPDATE tasks SET {", ".join(fields)} WHERE id=?',values+[task_id])
+        if result.rowcount==0:raise HTTPException(404,'Task not found.')
+        row=db.execute('SELECT * FROM tasks WHERE id=?',(task_id,)).fetchone()
+    return load_task(row)
+
+@app.delete('/api/tasks/{task_id}')
+def delete_task(task_id:str):
+    with connection() as db:
+        result=db.execute('DELETE FROM tasks WHERE id=?',(task_id,))
+        if result.rowcount==0:raise HTTPException(404,'Task not found.')
+    return {'deleted':True}
+
+@app.get('/api/evaluation')
+def evaluation():
+    p=ROOT/'research'/'evaluation.json'
+    if not p.exists():raise HTTPException(404,'Run python -m backend.evaluate to generate the evaluation report.')
+    return json.loads(p.read_text(encoding='utf-8'))
+
+@app.get('/')
+def home():
+    index=ROOT/'frontend'/'dist'/'index.html'
+    if index.exists():return FileResponse(index)
+    return {'app':'ActionInbox','frontend':'Run npm run dev in frontend/','api_docs':'/api/docs'}
+
+# Single-service hosting is possible, but authentication must be implemented first.
+# No general catch-all static mount here to avoid exposing private files on local disk.
+
+# Opt-in Gmail integration: read-only access, manual message selection,
+# and no background synchronization. Never log OAuth tokens or full email text.
+@app.get('/api/gmail/status')
+def gmail_status():
+    from .gmail import connection_status
+    return connection_status()
+
+@app.get('/api/gmail/messages')
+def gmail_messages(q: str = 'in:inbox newer_than:14d', limit: int = 10):
+    from .gmail import GmailUnavailable, list_messages
+    try:
+        return list_messages(q, limit)
+    except GmailUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+@app.get('/api/gmail/messages/{message_id}')
+def gmail_message(message_id: str):
+    from .gmail import GmailUnavailable, get_message
+    try:
+        return get_message(message_id)
+    except GmailUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+@app.get('/api/gmail/deadlines')
+def gmail_deadlines(limit:int=20):
+    from .gmail import GmailUnavailable,scan_deadlines
+    try:return scan_deadlines(limit)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+
+@app.get('/api/gmail/smart-radar')
+def gmail_smart_radar(limit:int=20, category:str="all"):
+    from .gmail import GmailUnavailable,scan_smart_inbox
+    try:return scan_smart_inbox(limit,category)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+)
+    priority:Literal['normal','medium','high']='normal'
+    due_date:date|None=None
+class TaskEdit(BaseModel):
+    title:str|None=Field(default=None,min_length=2,max_length=180)
+    due_date:date|None=None
+    category:Literal['payment','meeting','document','reply','other']|None=None
+    priority:Literal['normal','medium','high']|None=None
+    done:bool|None=None
+
+@contextmanager
+def connection():
+    DB_PATH.parent.mkdir(parents=True,exist_ok=True)
+    db=sqlite3.connect(DB_PATH,timeout=5)
+    db.row_factory=sqlite3.Row
+    try:
+        db.execute('''CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY,message_hash TEXT NOT NULL,title TEXT NOT NULL,
+          source_excerpt TEXT NOT NULL,subject TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL,priority TEXT NOT NULL,due_date TEXT,
+          done INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL
+        )''')
+        db.commit()
+        yield db
+        db.commit()
+    finally:db.close()
+
+def load_task(row):
+    obj=dict(row);obj['done']=bool(obj['done']);return obj
+
+@app.get('/api/health')
+def health():return {'ok':True,'mode':'local-first','paid_ai':False,'remote_email_access':False}
+
+@app.post('/api/analyze')
+def do_analyze(message:MessageIn):
+    try:return analyze(message.text,message.format,message.reference_date, subject_override=message.subject if message.subject else None)
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+
+@app.get('/api/tasks')
+def get_tasks():
+    with connection() as db:
+        rows=db.execute('SELECT * FROM tasks ORDER BY done ASC, CASE priority WHEN "high" THEN 0 WHEN "medium" THEN 1 ELSE 2 END, due_date IS NULL ASC, due_date ASC,created_at DESC').fetchall()
+    return [load_task(r) for r in rows]
+
+@app.post('/api/tasks',status_code=201)
+def save_task(task:TaskIn):
+    # A suggestion is never saved until the user clicks Approve. Original email is not persisted.
+    with connection() as db:
+        try:
+            db.execute('''INSERT INTO tasks (id,message_hash,title,source_excerpt,subject,category,priority,due_date,created_at)
+                  VALUES (?,?,?,?,?,?,?,?,?)''',(task.id,task.message_hash,task.title,task.source_excerpt,task.subject,task.category,task.priority,
+                  str(task.due_date) if task.due_date else None,datetime.now(timezone.utc).isoformat()))
+        except sqlite3.IntegrityError:raise HTTPException(409,'This suggestion was already added.')
+        row=db.execute('SELECT * FROM tasks WHERE id=?',(task.id,)).fetchone()
+    return load_task(row)
+
+@app.patch('/api/tasks/{task_id}')
+def edit_task(task_id:str,change:TaskEdit):
+    changes=change.model_dump(exclude_unset=True)
+    if not changes:raise HTTPException(400,'No changes supplied.')
+    fields=[];values=[]
+    for key,value in changes.items():
+        fields.append(f'{key}=?')
+        values.append(int(value) if key=='done' and value is not None else str(value) if key=='due_date' and value else value)
+    with connection() as db:
+        result=db.execute(f'UPDATE tasks SET {", ".join(fields)} WHERE id=?',values+[task_id])
+        if result.rowcount==0:raise HTTPException(404,'Task not found.')
+        row=db.execute('SELECT * FROM tasks WHERE id=?',(task_id,)).fetchone()
+    return load_task(row)
+
+@app.delete('/api/tasks/{task_id}')
+def delete_task(task_id:str):
+    with connection() as db:
+        result=db.execute('DELETE FROM tasks WHERE id=?',(task_id,))
+        if result.rowcount==0:raise HTTPException(404,'Task not found.')
+    return {'deleted':True}
+
+@app.get('/api/evaluation')
+def evaluation():
+    p=ROOT/'research'/'evaluation.json'
+    if not p.exists():raise HTTPException(404,'Run python -m backend.evaluate to generate the evaluation report.')
+    return json.loads(p.read_text(encoding='utf-8'))
+
+@app.get('/')
+def home():
+    index=ROOT/'frontend'/'dist'/'index.html'
+    if index.exists():return FileResponse(index)
+    return {'app':'ActionInbox','frontend':'Run npm run dev in frontend/','api_docs':'/api/docs'}
+
+# Single-service hosting is possible, but authentication must be implemented first.
+# No general catch-all static mount here to avoid exposing private files on local disk.
+
+# Opt-in Gmail integration: read-only access, manual message selection,
+# and no background synchronization. Never log OAuth tokens or full email text.
+@app.get('/api/gmail/status')
+def gmail_status():
+    from .gmail import connection_status
+    return connection_status()
+
+@app.get('/api/gmail/messages')
+def gmail_messages(q: str = 'in:inbox newer_than:14d', limit: int = 10):
+    from .gmail import GmailUnavailable, list_messages
+    try:
+        return list_messages(q, limit)
+    except GmailUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+@app.get('/api/gmail/messages/{message_id}')
+def gmail_message(message_id: str):
+    from .gmail import GmailUnavailable, get_message
+    try:
+        return get_message(message_id)
+    except GmailUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+@app.get('/api/gmail/deadlines')
+def gmail_deadlines(limit:int=20):
+    from .gmail import GmailUnavailable,scan_deadlines
+    try:return scan_deadlines(limit)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+
+@app.get('/api/gmail/smart-radar')
+def gmail_smart_radar(limit:int=20, category:str="all"):
+    from .gmail import GmailUnavailable,scan_smart_inbox
+    try:return scan_smart_inbox(limit,category)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+
+
+# v5 model-powered, user-triggered operations. These do not persist email data.
+@app.get('/api/ai/status')
+def ai_status():
+    from .local_ai import status
+    return status()
+
+class GmailAIIn(BaseModel):
+    message_ids:list[str]=Field(min_length=1,max_length=5)
+
+@app.post('/api/ai/gmail')
+def ai_gmail(request:GmailAIIn):
+    from .gmail import get_message, GmailUnavailable
+    from .local_ai import EmailItem, analyze_emails, LocalAIUnavailable
+    if len(set(request.message_ids))!=len(request.message_ids):
+        raise HTTPException(422,"Choose distinct email messages.")
+    messages=[]
+    try:
+        for message_id in request.message_ids:
+            msg=get_message(message_id)
+            if msg["has_text"]:
+                messages.append(EmailItem(id=msg["id"],subject=msg["subject"],
+                        body=msg["body"],sent_date=msg["reference_date"] or ""))
+        if not messages:
+            raise HTTPException(422,"No readable message bodies were selected.")
+        return analyze_emails(messages)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+    except LocalAIUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+
+class TextAIIn(BaseModel):
+    text:str=Field(min_length=1,max_length=32000)
+    subject:str=Field(default="",max_length=180)
+    reference_date:date|None=None
+
+@app.post('/api/ai/text')
+def ai_text(request:TextAIIn):
+    from .local_ai import EmailItem, analyze_emails, LocalAIUnavailable
+    try:
+        return analyze_emails([EmailItem(id="pasted_message",subject=request.subject,
+           body=request.text,sent_date=str(request.reference_date or ""))])
+    except LocalAIUnavailable as exc:raise HTTPException(503,str(exc)) from exc
