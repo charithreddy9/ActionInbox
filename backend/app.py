@@ -24,6 +24,7 @@ class MessageIn(BaseModel):
     text:str=Field(min_length=1,max_length=32000)
     format:Literal['text','eml']='text'
     reference_date:date|None=None
+    subject:str=Field(default='',max_length=180)
 class TaskIn(BaseModel):
     id:str=Field(pattern=r'^[a-f0-9]{20}$')
     message_hash:str=Field(pattern=r'^[a-f0-9]{64}$')
@@ -65,7 +66,7 @@ def health():return {'ok':True,'mode':'local-first','paid_ai':False,'remote_emai
 
 @app.post('/api/analyze')
 def do_analyze(message:MessageIn):
-    try:return analyze(message.text,message.format,message.reference_date)
+    try:return analyze(message.text,message.format,message.reference_date, subject_override=message.subject if message.subject else None)
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc
 
 @app.get('/api/tasks')
@@ -121,3 +122,26 @@ def home():
 
 # Single-service hosting is possible, but authentication must be implemented first.
 # No general catch-all static mount here to avoid exposing private files on local disk.
+
+# Opt-in Gmail integration: read-only access, manual message selection,
+# and no background synchronization. Never log OAuth tokens or full email text.
+@app.get('/api/gmail/status')
+def gmail_status():
+    from .gmail import connection_status
+    return connection_status()
+
+@app.get('/api/gmail/messages')
+def gmail_messages(q: str = 'in:inbox newer_than:14d', limit: int = 10):
+    from .gmail import GmailUnavailable, list_messages
+    try:
+        return list_messages(q, limit)
+    except GmailUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+@app.get('/api/gmail/messages/{message_id}')
+def gmail_message(message_id: str):
+    from .gmail import GmailUnavailable, get_message
+    try:
+        return get_message(message_id)
+    except GmailUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc

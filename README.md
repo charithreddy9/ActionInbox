@@ -2,9 +2,9 @@
 
 ### Turn the emails you meant to act on into a task list you actually use.
 
-**An offline-first, review-before-saving email-to-task app.** Built with React, FastAPI, SQLite, and a small local scikit-learn model. No mailbox permissions, GPU, or paid AI API required.
+**An offline-first, review-before-saving email-to-task app.** Built with React, FastAPI, SQLite, and a small local scikit-learn model. Gmail access is optional (read-only OAuth). No GPU or paid AI API required.
 
-[![GitHub Actions](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml/badge.svg)](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml)
+[![GitHub Actions](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml/badge.svg?branch=feature%2Fgmail-readonly)](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml?query=branch%3Afeature%2Fgmail-readonly)
 
 ![ActionInbox frontend checks](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-97a9ff) ![Local ML](https://img.shields.io/badge/ML-scikit--learn-b9ffa7) ![Review first](https://img.shields.io/badge/Task%20approval-Manual-93e6cc)
 
@@ -12,7 +12,7 @@
 
 My inbox tends to mix two different kinds of information: things I should read, and things I actually need to do. The second kind is easy to lose between newsletters, receipts, and meeting updates. I wanted a tool that could make a first pass over a message, point to the exact sentence that matters, and let me decide whether it belongs on my task list.
 
-**ActionInbox doesn't connect to Gmail, send emails, or silently create reminders.** You paste an email or import a small `.eml` file, review the suggestions, edit anything the model got wrong, and click **Approve task**. Only approved task details and their source excerpts go into the local SQLite database.
+**Gmail is optional (v2 branch only). ActionInbox never sends emails or silently creates reminders.** You paste an email or import a small `.eml` file, review the suggestions, edit anything the model got wrong, and click **Approve task**. Only approved task details and their source excerpts go into the local SQLite database.
 
 ## What you can do
 
@@ -45,6 +45,14 @@ flowchart LR
 I deliberately kept the model small and inspectable. The TF-IDF / logistic regression pipeline is trained on **60 fictional labeled sentences** across five categories: payment, meeting, document, reply, and other. Keyword rules provide additional signals. Date extraction uses explicit date formats and a small set of relative expressions like “tomorrow” or “Friday.” Dates that are absent aren't invented.
 
 This is not a language model, so there's no API key, generated reasoning, or hidden call to a hosted model. The classification score shown in code is **not calibrated confidence** in the correctness of a task.
+
+## Optional Gmail integration (v2 branch)
+
+You can now connect your **own** Gmail account to ActionInbox, but only if you decide to. The Gmail feature is in the [`feature/gmail-readonly`](https://github.com/charithreddy9/ActionInbox/tree/feature/gmail-readonly) branch while the original version stays untouched on `main`.
+
+The setup uses Google's OAuth desktop flow and **read-only** Gmail permission. You click to search, select a message to preview, and send it to the existing local analyzer. It does **not** scan your inbox automatically, upload emails to a hosted AI model, send/modify messages, or save anything without task approval. Google's Gmail API is contacted when you choose to use this feature.
+
+**[Gmail setup guide — Windows PowerShell](GMAIL_SETUP.md)** includes the exact Google Cloud and local terminal steps. Keep `credentials.json` and `data/gmail-token.json` private; both are excluded from Git. Google classifies `gmail.readonly` as a restricted scope, so this is for local personal testing, not a publicly deployed multi-user integration.
 
 ## Getting started
 
@@ -98,10 +106,10 @@ See [Research notes](research/RESEARCH.md) for the failure analysis and next exp
 ## Privacy and current limitations
 
 - This is a **local-first prototype**, not a public SaaS. Run the backend bound to `127.0.0.1`. There is **no login/authentication**, so don't expose it on a public server or shared network.
-- Email messages are analyzed in-process. The raw pasted message isn't stored by the backend; approved task title, source excerpt, subject, category, due date, and a hash are saved to local SQLite. The browser keeps the pasted message in memory until you navigate/reload.
+- Email messages are analyzed in-process. The raw pasted or Gmail-selected message isn't stored by the backend; approved task title, source excerpt, subject, category, due date, and a hash are saved to local SQLite. The browser keeps the pasted message in memory until you navigate/reload.
 - `.eml` import handles text/plain or simple text/html email bodies. It does **not** scan attachments, validate sender authenticity, decrypt messages, or handle every email client variation.
 - Relative date language can be ambiguous; timezone and meeting-hour extraction are not implemented. The app displays a date suggestion for review, not a guaranteed appointment.
-- This app does **not** access inboxes automatically, send notifications, write to calendars, or execute instructions embedded in emails. That would require a more secure authentication and permissions design.
+- This app does **not** synchronize inboxes automatically, send notifications, write to calendars, or execute instructions embedded in emails. That would require a more secure authentication and permissions design.
 - The ML model and action-detector can produce false positives and false negatives. The human approval step is intentional, not just a UI detail.
 
 ## Next experiments I'd try

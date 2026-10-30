@@ -118,9 +118,11 @@ def classify(sentence):
     elif re.search(r'\b(reply|respond|let me know|write back)\b',sentence,re.I):category='reply'
     return category,round(score,3)
 
-def analyze(text,format='text',reference=None):
+def analyze(text,format='text',reference=None,subject_override=None):
     reference=reference or date.today()
     subject,body=parse_message(text,format)
+    if subject_override is not None and format=="text":
+        subject=subject_override[:180]
     candidates=[]
     clean=clean_body(body)
     fingerprint=hashlib.sha256((subject+'\n'+clean).encode()).hexdigest()
