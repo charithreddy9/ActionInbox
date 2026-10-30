@@ -109,6 +109,17 @@ This is a **localhost-only prototype**, not a public multi-user service. No appl
 
 Full email bodies are processed locally on request but are not written into the tasks database. Approved tasks do store selected task details and supporting excerpts. The user must validate any deadline or financial implication against the actual email/provider.
 
+## Portfolio demo and offline evaluation protocol
+
+- [Three-minute fictional-email demo, real-model smoke test and benchmark instructions](DEMO.md)
+- [18 project-authored, fictional email test cases](research/local_ai_fictional_cases.json)
+- [Local model evaluation runner](backend/evaluate_local_ai.py) and [scoring tests](tests/test_evaluate_local_ai.py)
+- [GitHub Actions](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml?query=branch%3Afeature%2Fllm-email-intelligence) verifies the runner and application logic **without using Gmail or loading the LLM**.
+
+The local benchmark includes single- and multiple-task emails, advertisements, receipts, cancellations, rebookings, relative dates, missing dates, and a prompt-injection test. It evaluates **task count, evidence + date + source agreement, and inference latency**.
+
+No measurements are published as *real-Qwen accuracy* until the model has actually completed these cases. The evaluation set is small and written by the developer, so even measured results would be **development metrics**, not proof of generalization.
+
 ## What I'd evaluate next
 
 The next milestone is a **real-model benchmark** of emails with zero, one and multiple actions, misleading promotions, completed events, and contradictory updates. I want to measure actionable-task precision/recall, deadline association, unsupported suggestions, incorrect event merges, and local inference latency, alongside the existing regression suite.
