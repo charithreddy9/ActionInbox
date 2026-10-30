@@ -31,13 +31,13 @@ class TaskIn(BaseModel):
     title:str=Field(min_length=2,max_length=180)
     source_excerpt:str=Field(min_length=1,max_length=350)
     subject:str=Field(default='',max_length=180)
-    category:str=Field(min_length=2,max_length=40,pattern=r'^[a-z0-9_]+$')
+    category:str=Field(min_length=2,max_length=40,pattern=r'^[a-z0-9_]+
     priority:Literal['normal','medium','high']='normal'
     due_date:date|None=None
 class TaskEdit(BaseModel):
     title:str|None=Field(default=None,min_length=2,max_length=180)
     due_date:date|None=None
-    category:str|None=Field(default=None,min_length=2,max_length=40,pattern=r'^[a-z0-9_]+$')
+    category:str|None=Field(default=None,min_length=2,max_length=40,pattern=r'^[a-z0-9_]+
     priority:Literal['normal','medium','high']|None=None
     done:bool|None=None
 
@@ -529,7 +529,6 @@ def gmail_smart_radar(limit:int=20, category:str="all"):
     from .gmail import GmailUnavailable,scan_smart_inbox
     try:return scan_smart_inbox(limit,category)
     except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
-
 
 # v5 model-powered, user-triggered operations. These do not persist email data.
 @app.get('/api/ai/status')
