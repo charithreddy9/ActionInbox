@@ -1,123 +1,116 @@
 # ActionInbox
 
-### Turn the emails you meant to act on into a task list you actually use.
+**Local-first email intelligence: find actionable requests, organize deadlines, and review every task before saving.**
 
-**An offline-first, review-before-saving email-to-task app.** Built with React, FastAPI, SQLite, and a small local scikit-learn model. Gmail access is optional (read-only OAuth). No GPU or paid AI API required.
+**Current development branch:** [`feature/llm-email-intelligence`](https://github.com/charithreddy9/ActionInbox/tree/feature/llm-email-intelligence) · [Stable baseline (`main`)](https://github.com/charithreddy9/ActionInbox/tree/main)
 
-[![GitHub Actions](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml/badge.svg?branch=feature%2Fgmail-readonly)](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml?query=branch%3Afeature%2Fgmail-readonly)
+[![v5 backend and frontend CI](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml/badge.svg?branch=feature%2Fllm-email-intelligence)](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml?query=branch%3Afeature%2Fllm-email-intelligence)
 
-![ActionInbox frontend checks](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-97a9ff) ![Local ML](https://img.shields.io/badge/ML-scikit--learn-b9ffa7) ![Review first](https://img.shields.io/badge/Task%20approval-Manual-93e6cc)
+**Stack:** Python · FastAPI · Ollama / Qwen3 4B · scikit-learn · React / Vite · SQLite · Gmail API (read-only) · pytest · GitHub Actions
 
-## Why this project
+## The problem
 
-My inbox tends to mix two different kinds of information: things I should read, and things I actually need to do. The second kind is easy to lose between newsletters, receipts, and meeting updates. I wanted a tool that could make a first pass over a message, point to the exact sentence that matters, and let me decide whether it belongs on my task list.
+Important emails compete with receipts, subscriptions, confirmations, marketing, and repeated reminders. A single email can contain several independent tasks; a later message can also cancel, complete, or change an earlier event.
 
-**Gmail is optional (v2 branch only). ActionInbox never sends emails or silently creates reminders.** You paste an email or import a small `.eml` file, review the suggestions, edit anything the model got wrong, and click **Approve task**. Only approved task details and their source excerpts go into the local SQLite database.
+I built ActionInbox to turn that information into reviewable actions without handing control of my inbox or to-do list to an automated agent. Gmail is **optional, read-only and explicitly user-triggered**. The app runs locally and does **not** send email, make purchases, modify calendars or automatically save tasks.
 
-## What you can do
+## v5: Model-driven email understanding (experimental)
 
-1. **Analyze a message:** Paste text or import `.eml` / `.txt`. You can try the fictional example included in the interface.
-2. **Review every suggestion:** See the original supporting sentence, suggested category, possible due date, and a short explanation of the rule that fired.
-3. **Correct before saving:** Change the title, due date, priority, or category—or dismiss the suggestion altogether.
-4. **Work through your list:** Mark tasks complete, search and filter them, edit their details, and export approved tasks as a CSV.
-5. **Inspect the model:** Open the ML Evaluation tab and explore both the passing and failing examples from the recorded synthetic development check.
+The **Local AI** panel is a new path alongside the older rule-based Smart Inbox Radar. A user manually searches Gmail, selects **1–5 messages**, and requests analysis. The selected bodies are sent to an installed **local Ollama model** on the user's computer.
 
-**Example email**
+The language model is instructed to:
+- Extract **zero, one, or multiple** independent actionable items from selected emails.
+- Infer semantic **task categories**, rather than choosing from provider-name or keyword rules.
+- Suggest deadlines, priorities, event lifecycle status, and supporting evidence.
+- Consider whether multiple **selected messages** describe the same underlying event.
+- Distinguish potential obligations from advertisements, confirmations, and completed actions.
 
-> Please pay the internet bill by November 8. Could you upload the signed lease form by Friday?
+The server validates the model's JSON shape, source message IDs, ISO date syntax, and whether an evidence excerpt appears in the provided source text. **These checks do not prove semantic correctness**: users must verify the proposed action and date.
 
-The app suggests two tasks, each with its own quoted source sentence and detected date. It does not save either one until you approve it. For ambiguous dates (including “next Friday”) the suggested interpretation should be reviewed before saving.
+After analysis, suggested tasks appear in an **editable review step**. Only clicking **Approve task** stores an approved task in local SQLite. Approved tasks can be edited, completed, searched, or exported as CSV.
 
-## The interesting part: a small, testable NLP pipeline
+### Architecture
 
 ```mermaid
 flowchart LR
-    A[Paste email / import .eml] --> B[Extract safe text]
-    B --> C[Find sentences containing action language]
-    C --> D[TF-IDF + logistic regression: classify intent]
-    D --> E[Keyword and date rules]
-    E --> F[Human review: edit, approve, or dismiss]
-    F -->|Approve| G[Local SQLite tasks]
-    F -->|Dismiss| H[Do not save]
-    G --> I[Task board / CSV export]
+    G[User-selected Gmail messages] --> F[FastAPI: read-only fetch]
+    F --> L[Local Ollama model]
+    L --> V[Structured-output and evidence checks]
+    V --> R{User review}
+    R -->|Approve| S[(Local SQLite task)]
+    R -->|Dismiss| X[No save]
+    S --> B[Task board / CSV]
 ```
 
-I deliberately kept the model small and inspectable. The TF-IDF / logistic regression pipeline is trained on **60 fictional labeled sentences** across five categories: payment, meeting, document, reply, and other. Keyword rules provide additional signals. Date extraction uses explicit date formats and a small set of relative expressions like “tomorrow” or “Friday.” Dates that are absent aren't invented.
+**Why this is a separate development branch:** The older keyword and TF-IDF pipelines remain available for comparison and regression testing. v5's model-driven path is still being validated on real model outputs. Existing CI tests cover application behavior using **mocked model responses**; a successful CI run is **not** proof of accurate extraction on live Gmail messages.
 
-This is not a language model, so there's no API key, generated reasoning, or hidden call to a hosted model. The classification score shown in code is **not calibrated confidence** in the correctness of a task.
+### Known limitations
 
-## Optional Gmail integration (v2 branch)
+- A real Ollama inference request has surfaced a **503** during local testing; improved diagnostics are committed, but the underlying runtime/model issue needs verification on the local machine.
+- The first implementation analyzes up to **five explicitly selected messages** at once, not the entire inbox.
+- Model grouping works on the currently selected batch and is not guaranteed across different selections.
+- Quote checks verify that evidence text exists, **not** whether the inferred task and date are correct.
+- Dates are currently represented as dates, not guaranteed timezone-aware appointment times.
+- The schema caps output at 24 events per analysis. Bigger batches need explicit pagination/incomplete-output handling.
+- The legacy rule-based Smart Inbox Radar is still available as a separate feature.
+- Gmail account switching and account-scoped task tracking are **future milestones**.
 
-You can now connect your **own** Gmail account to ActionInbox, but only if you decide to. The Gmail feature is in the [`feature/gmail-readonly`](https://github.com/charithreddy9/ActionInbox/tree/feature/gmail-readonly) branch while the original version stays untouched on `main`.
+Read [LOCAL_AI_V5.md](LOCAL_AI_V5.md) for the evolving local-AI setup and design notes.
 
-The setup uses Google's OAuth desktop flow and **read-only** Gmail permission. You click to search, select a message to preview, and send it to the existing local analyzer. It does **not** scan your inbox automatically, upload emails to a hosted AI model, send/modify messages, or save anything without task approval. Google's Gmail API is contacted when you choose to use this feature.
+## Earlier versions and lessons
 
-**[Gmail setup guide — Windows PowerShell](GMAIL_SETUP.md)** includes the exact Google Cloud and local terminal steps. Keep `credentials.json` and `data/gmail-token.json` private; both are excluded from Git. Google classifies `gmail.readonly` as a restricted scope, so this is for local personal testing, not a publicly deployed multi-user integration.
+**v1 — Explainable baseline.** A TF-IDF + logistic regression classifier trained on **60 fictional labeled sentences**, with transparent action and date rules. On an author-written 27-case **intent-category development check**, it scored **21/27 (77.8%)**, macro-F1 **0.778**. This measures category prediction on a small synthetic set — **not** real-email task extraction precision or model quality.
 
-## Getting started
+**v2 — Gmail read-only integration.** Local OAuth credentials, explicit email search and preview, no automatic Gmail modifications.
 
-Requires **Python 3.11+** and **Node.js 22+**. From the repository root:
+**v3/v4 — Deadline Radar.** User-triggered bounded scans for bills, subscriptions, trials, travel pickups, appointments and more, with regression cases for promotional false positives, duplicate notices and completed confirmations.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements-dev.txt
-python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
+These versions made the shortcomings concrete: a billing advertisement can look like a payment reminder; an email's legal footer can be mistaken for a new action; and a failed pickup should supersede an earlier reminder. The new model-based approach is designed to address those failure modes, but still requires measurement.
+
+## Run v5 locally (Windows)
+
+Requirements: **Python 3.11+**, **Node.js 22+**, optional Gmail OAuth configuration, and [Ollama](https://ollama.com/download).
+
+```powershell
+git clone https://github.com/charithreddy9/ActionInbox.git
+cd ActionInbox
+git switch feature/llm-email-intelligence
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+ollama pull qwen3:4b
+.\.venv\Scripts\python.exe -m uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-In another terminal:
+In another PowerShell window:
 
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. The Vite dev server proxies `/api` to FastAPI. You do **not** need to configure a database: the first approved task creates a local `data/tasks.sqlite3` file, which is ignored by Git.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). For Gmail OAuth setup use [GMAIL_SETUP.md](GMAIL_SETUP.md). On the Gmail screen, search for messages, select up to five, then use **Local AI → Analyze selected emails**.
 
-To generate the evaluation report and run tests:
+You can also test local AI on fictional pasted text using the API without connecting Gmail.
 
-```bash
-python -m pytest -q
-python -m backend.evaluate
-cd frontend && npm run build
+Run automated checks:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+cd frontend
+npm run build
 ```
 
-The included GitHub Actions workflow runs backend tests, generates the evaluation report, and builds the frontend.
+To choose a different installed Ollama model, set the `ACTIONINBOX_OLLAMA_MODEL` environment variable before starting the backend. The model endpoint is local `127.0.0.1:11434`.
 
-## Actual evaluation, including mistakes
+## Privacy and safety
 
-The training set is small and synthetic. I made a separate **27-sentence author-written development check**, including harder wording and some misleading non-action statements. On that set the intent-classification pipeline scored:
+This is a **localhost-only prototype**, not a public multi-user service. No application authentication is implemented; do not expose FastAPI or Ollama on a public interface. Keep `credentials.json`, `data/gmail-token.json` and the local SQLite database private. Gmail access is read-only, and model-derived instructions are **suggestions**, never actions the application executes automatically.
 
-| Metric | Result |
-|---|---:|
-| Intent category accuracy | **77.8% (21/27)** |
-| Intent macro-F1 | **0.778** |
-| Examples with wrong categories | **6** |
+Full email bodies are processed locally on request but are not written into the tasks database. Approved tasks do store selected task details and supporting excerpts. The user must validate any deadline or financial implication against the actual email/provider.
 
-Some mistakes are revealing. “Our invoice was paid in full” was predicted as a payment task even though it is informational. “Meet me to discuss the handoff” was assigned to the wrong category. The full case-level results, confusion matrix, and labels are in [`research/evaluation.json`](research/evaluation.json).
+## What I'd evaluate next
 
-![Confusion matrix of 27 synthetic intent-category checks](research/confusion_matrix.png)
+The next milestone is a **real-model benchmark** of emails with zero, one and multiple actions, misleading promotions, completed events, and contradictory updates. I want to measure actionable-task precision/recall, deadline association, unsupported suggestions, incorrect event merges, and local inference latency, alongside the existing regression suite.
 
-The model results above measure **intent categorization only**, not task-detection precision, extraction quality, date correctness, or a fully automated workflow. The evaluation questions were manually authored by the same project author and resemble the training domain. This is a regression check—not representative performance on real personal emails. The unit suite separately tests common date formats, deduplication, `.eml` parsing, quotation suppression, and approval behavior.
-
-See [Research notes](research/RESEARCH.md) for the failure analysis and next experiment.
-
-## Privacy and current limitations
-
-- This is a **local-first prototype**, not a public SaaS. Run the backend bound to `127.0.0.1`. There is **no login/authentication**, so don't expose it on a public server or shared network.
-- Email messages are analyzed in-process. The raw pasted or Gmail-selected message isn't stored by the backend; approved task title, source excerpt, subject, category, due date, and a hash are saved to local SQLite. The browser keeps the pasted message in memory until you navigate/reload.
-- `.eml` import handles text/plain or simple text/html email bodies. It does **not** scan attachments, validate sender authenticity, decrypt messages, or handle every email client variation.
-- Relative date language can be ambiguous; timezone and meeting-hour extraction are not implemented. The app displays a date suggestion for review, not a guaranteed appointment.
-- This app does **not** synchronize inboxes automatically, send notifications, write to calendars, or execute instructions embedded in emails. That would require a more secure authentication and permissions design.
-- The ML model and action-detector can produce false positives and false negatives. The human approval step is intentional, not just a UI detail.
-
-## Next experiments I'd try
-
-I'd start by measuring **end-to-end action extraction** on a larger independently labeled email dataset, not by adding a larger model. After that: improve false-positive filtering for informational emails, measure date extraction accuracy separately, and compare local small language models against the simple classifier **only if** they clearly improve reliability and latency. For daily use, reminders and calendar export would be reasonable next features once the basics are tested.
-
----
-
-**Tech:** Python · FastAPI · scikit-learn · dateutil · SQLite · React · Vite · pytest · GitHub Actions
-
-*I built this as a practical AI/ML engineering project: a useful interface, an explainable baseline, real failure cases, automated tests, and privacy choices that matter.*
+**Build the system, test the assumptions, keep the failures visible.**
