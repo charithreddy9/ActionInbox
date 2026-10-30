@@ -24,9 +24,12 @@ AD=re.compile(r"\b(?:shop now|exclusive offer|limited.time offer|refer a friend|
 NON_EVENTS=re.compile(r"\b(?:has been delivered|was delivered|order delivered|order shipped|shipped \d+ items|your order shipped|out for delivery|thank you for your order|order placed|order confirmation)\b",re.I)
 STRONG=re.compile(r"\b(?:pickup reminder|luggage pickup|pick[- ]?up is scheduled|pick[- ]?up by|check[- ]in opens|boarding starts|appointment reminder|appointment scheduled|flight departs|submission deadline|submit by|must upload|complete your application by|package ready for pickup|collect your package by)\b",re.I)
 def _type(text):
-    if re.search(r"\\b(?:package|parcel|locker)\\b",text,re.I) and re.search(EVENTS["delivery"],text,re.I):return "delivery"
+    lower=text.lower()
+    if any(word in lower for word in ("package","parcel","locker")) and any(word in lower for word in ("pickup","pick-up","pick up","collect","collection")):
+        return "delivery"
     for kind in ("travel","flight","appointment","delivery","document"):
-        if re.search(CATEGORIES[kind],text,re.I) and re.search(EVENTS[kind],text,re.I):return kind
+        if re.search(CATEGORIES[kind],text,re.I) and re.search(EVENTS[kind],text,re.I):
+            return kind
     return None
 
 def reminder_hints(subject,body,sent_date="",today=None):
