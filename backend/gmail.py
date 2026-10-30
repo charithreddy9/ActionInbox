@@ -321,3 +321,50 @@ def scan_deadlines(limit=20):
             "saved":False,"notice":"Possible deadlines only. Review original billing accounts; this is not an exhaustive audit."}
     except GmailUnavailable:raise
     except Exception as exc:raise GmailUnavailable("Deadline scan failed. Check your Gmail connection.") from exc
+
+def scan_smart_inbox(limit=20):
+    """On-demand scan, balanced searches, no persistence."""
+    from .deadlines import deadline_hints,notice_kind,sort_items
+    from .reminders import reminder_hints
+    if not 1<=limit<=25:raise GmailUnavailable("Limit must be 1-25")
+    queries={
+      "payment":'newer_than:180d {invoice "payment due" "bill due" "amount due" billing}',
+      "subscription":'newer_than:180d {subscription renewal renews "auto renew"}',
+      "trial":'newer_than:180d {"trial ends" "trial expires" "free trial" "trial ending"}',
+      "travel":'newer_than:90d {"pickup reminder" "luggage pickup" "baggage pickup" "drop off" lugless}',
+      "flight":'newer_than:90d {"flight check-in" "boarding pass" "flight reminder" "departure reminder"}',
+      "appointment":'newer_than:90d {"appointment reminder" "appointment confirmed" "meeting reminder" "interview scheduled"}',
+      "delivery":'newer_than:90d {"ready for pickup" "pick up your package" "collect your package" "locker expires"}',
+      "document":'newer_than:90d {"submission deadline" "submit by" "upload your document" "application deadline"}',
+    }
+    try:
+        svc=_service()
+        ids=[];counts={}
+        for kind,query in queries.items():
+            data=svc.users().messages().list(userId="me",q=query,maxResults=limit,includeSpamTrash=False).execute()
+            matches=[_validate_id(entry["id"]) for entry in data.get("messages",[])]
+            counts[kind]=len(matches)
+            ids.extend(matches)
+        ids=list(dict.fromkeys(ids))[:limit*len(queries)]
+        dated=[];undated=[]
+        for message_id in ids:
+            message=svc.users().messages().get(userId="me",id=message_id,format="full").execute()
+            payload=message.get("payload") or {}
+            subject=_header(payload,"Subject") or "(No subject)"
+            sender=_header(payload,"From");sent=_header(payload,"Date")
+            body=extract_body(payload)
+            finance=deadline_hints(subject,body,sent)
+            other,other_kind=reminder_hints(subject,body,sent)
+            # Prefer the more specific financial or logistical analysis, not both.
+            hints=finance or other
+            for hint in hints:
+                dated.append({"message_id":message_id,"subject":subject,"sender":sender,**hint})
+            if not hints:
+                kind=notice_kind(subject,body) or other_kind
+                if kind:
+                    undated.append({"message_id":message_id,"subject":subject,"sender":sender,"type":kind})
+        return {"items":sort_items(dated),"undated":undated[:50],"scanned":len(ids),
+           "searched_categories":counts,"saved":False,
+           "notice":"Potential reminders, not verified obligations. Check the original email."}
+    except GmailUnavailable:raise
+    except Exception as exc:raise GmailUnavailable("Smart Inbox scan failed. Verify Gmail connection.") from exc

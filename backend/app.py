@@ -151,3 +151,9 @@ def gmail_deadlines(limit:int=20):
     from .gmail import GmailUnavailable,scan_deadlines
     try:return scan_deadlines(limit)
     except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
+
+@app.get('/api/gmail/smart-radar')
+def gmail_smart_radar(limit:int=20):
+    from .gmail import GmailUnavailable,scan_smart_inbox
+    try:return scan_smart_inbox(limit)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc
