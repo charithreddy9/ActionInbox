@@ -45,15 +45,12 @@ RECEIPT = re.compile(
 # Offers may discuss future charges in fine print without showing that the
 # recipient activated a trial. Do not treat these as existing obligations.
 TRIAL_OFFER_SUBJECT = re.compile(
-    r"\b(?:"
-    r"(?:your\s+)?(?:recent\s+)?(?:.{0,80}?\s+)?purchase includes\s+.{0,100}?\btrial\b|"
-    r"you(?:'re|’re|\s+are)\s+eligible\s+for\b|"
-    r"(?:claim|redeem|activate)\s+(?:your\s+)?(?:free\s+)?trial\b|"
-    r"trial (?:offer|promotion|deal)\b|"
-    r"complimentary\s+trial\b"
-    r")", re.I
+    r"(?:\bpurchase includes\b.{0,120}\btrial\b|"
+    r"\b(?:you're|you’re|you are)\s+eligible\s+for\b|"
+    r"\b(?:claim|redeem|activate)\s+(?:your\s+)?(?:free\s+)?trial\b|"
+    r"\btrial (?:offer|promotion|deal)\b|"
+    r"\bcomplimentary\s+trial\b)", re.I
 )
-
 
 def _is_nonactionable_subject(subject: str) -> bool:
     return bool(MARKETING.search(subject) or RECEIPT.search(subject) or
