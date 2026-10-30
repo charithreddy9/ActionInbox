@@ -123,7 +123,7 @@ def _date_on_line(line: str, ref: date, *, event_on_line: bool):
 def deadline_hints(subject: str, body: str, sent_date: str = "", today: date | None = None):
     """Find dated events; no automatic task creation or financial assertions."""
     today = today or date.today()
-    if MARKETING.search(subject) or RECEIPT.search(subject):
+    if _is_nonactionable_subject(subject):
         return []
     reference = _reference(sent_date, today)
     source = (subject + "\n" + body)[:32000]
