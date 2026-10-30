@@ -75,3 +75,56 @@ def test_task_approval_and_dedup(tmp_path,monkeypatch):
 
 def test_input_length_limit():
     with pytest.raises(ValueError):analyze('A'*32001)
+
+
+def test_transactional_trial_email_yields_one_relevant_suggestion():
+    from datetime import date
+    text=(
+      "Make the most of your 4% APY with Gold.\n"
+      "Take advantage of a high yield and start earning more.\n"
+      "As a reminder, your Gold free trial ends tomorrow. "
+      "You’ll be charged $5/month to your Robinhood brokerage account when your free trial ends.\n"
+      "The 3% matching on contributions requires a subscription with Robinhood Gold.\n"
+      "Customers must stay subscribed for 1 year.\n"
+      "The funds that earned the match must be kept for 5 years.\n"
+      "The annual tax filing deadline typically is April 15th.\n"
+      "You must have compensation to contribute to an IRA.\n"
+      "Robinhood does not provide tax advice; please consult with a tax adviser if you have questions.\n"
+    )
+    result=analyze(text,reference=date(2026,10,29),subject_override="Your free trial is ending")
+    assert len(result["suggestions"])==1
+    one=result["suggestions"][0]
+    assert "free-trial" in one["title"]
+    assert one["due_date"]=="2026-10-30"
+    assert "trial ends tomorrow" in one["source_excerpt"]
+    assert one["needs_review"] and one["category"]=="payment"
+
+
+def test_transactional_trial_with_repeated_text_not_duplicated():
+    from datetime import date
+    text="As a reminder, your Gold free trial ends tomorrow.\n" * 3
+    result=analyze(text,reference=date(2026,10,29),subject_override="Your free trial is ending")
+    assert len(result["suggestions"])==1
+
+
+def test_ordinary_email_still_extracts_three_distinct_actions():
+    from datetime import date
+    text=("Please update my resume by November 3, 2026.\n"
+          "Send the completed project report by November 5, 2026.\n"
+          "Schedule a meeting by November 9, 2026.")
+    result=analyze(text,reference=date(2026,10,30),subject_override="ActionInbox Test")
+    assert len(result["suggestions"])==3
+
+
+def test_repeated_generic_request_does_not_double_create_task():
+    from datetime import date
+    text="Please upload the signed lease form by Friday.\nPlease upload the signed lease form by Friday."
+    result=analyze(text,reference=date(2026,10,30))
+    assert len(result["suggestions"])==1
+
+
+def test_undated_trial_remains_reviewable_without_invented_date():
+    from datetime import date
+    result=analyze("Your Gold free trial is ending soon.",reference=date(2026,10,30),subject_override="Your free trial is ending")
+    assert len(result["suggestions"])==1
+    assert result["suggestions"][0]["due_date"] is None

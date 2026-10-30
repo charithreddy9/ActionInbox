@@ -20,6 +20,15 @@ from .training import EXAMPLES
 MAX_INPUT=32000
 ACTION_RE = re.compile(r"\b(please|could you|can you|would you|need to|must|remember to|don't forget|submit|upload|send|reply|respond|confirm|schedule|book|pay|settle|review|sign|complete|renew|follow up|let me know|due|deadline|appointment|interview|registration|rsvp)\b",re.I)
 STOP_RE = re.compile(r"\b(unsubscribe|shop now|save \d+%|limited offer|exclusive discount|flash sale|click here to buy)\b", re.I)
+NON_ACTIONABLE_RE = re.compile(
+    r"\b(?:take advantage of|start earning|get started|make the most of|"
+    r"refer a friend|does not provide tax advice|"
+    r"tax filing deadline typically|requires a subscription|"
+    r"customers must stay subscribed|funds (?:that .*?)?must be kept|"
+    r"must have compensation|contribution limit|"
+    r"for more information (?:refer|visit)|subject to change)\b", re.I
+)
+
 URGENT_RE = re.compile(r"\b(urgent|asap|immediately|overdue|final reminder|past due|critical)\b",re.I)
 DATEWORDS = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
 MONTHDAY=re.compile(rf"\b({DATEWORDS}\s+\d{{1,2}}(?:,?\s*\d{{4}})?)\b",re.I)
@@ -126,8 +135,74 @@ def analyze(text,format='text',reference=None,subject_override=None):
     candidates=[]
     clean=clean_body(body)
     fingerprint=hashlib.sha256((subject+'\n'+clean).encode()).hexdigest()
+
+    # Structured transaction alerts are not ordinary requests. If a subject
+    # actually announces an ending trial, renewal, or bill, make ONE reviewable
+    # reminder rather than classifying legal notices and marketing text as tasks.
+    from .deadlines import notice_kind, deadline_hints
+    notice_type = notice_kind(subject) if subject else None
+    if notice_type is not None:
+        matches = [
+            hint for hint in deadline_hints(
+                subject, body,
+                sent_date=reference.strftime('%a, %d %b %Y 12:00:00 +0000'),
+                today=reference,
+            )
+            if hint["type"] == notice_type
+        ]
+        matches = matches[:3]
+        descriptions = {
+            "trial": "Review free-trial ending and possible charge",
+            "subscription": "Review subscription renewal",
+            "payment": "Review bill or payment notice",
+        }
+        # When the message says a trial ends but omits an exact date, still
+        # give a single review item rather than inventing a due date.
+        if not matches:
+            matches = [{"due_date": None, "matched_date": None, "type": notice_type}]
+        suggestions = []
+        seen_dates = set()
+        for hint in matches:
+            due = hint["due_date"]
+            if due in seen_dates:
+                continue
+            seen_dates.add(due)
+            evidence = next(
+                (sentence for sentence in sentences(body)
+                 if re.search(r'\b(?:trial|renew|subscription|bill|payment|invoice|charg)\w*\b', sentence, re.I)
+                 and not NON_ACTIONABLE_RE.search(sentence)),
+                subject,
+            )[:350]
+            days = (date.fromisoformat(due) - date.today()).days if due else None
+            priority = ("high" if days is not None and days <= 2 else
+                        "medium" if days is None or days <= 7 else "normal")
+            reasons = ["Financial notice: verify the original email and provider before taking action"]
+            if hint.get("matched_date"):
+                reasons.append("Date in original email: " + hint["matched_date"])
+            else:
+                reasons.append("No reliable deadline found: check the provider")
+            if days is not None and days < 0:
+                reasons.append("This date is in the past; check whether it is still relevant")
+            task_id = hashlib.sha256(
+                (fingerprint + '\nnotice:' + notice_type + ':' + str(due)).encode()
+            ).hexdigest()[:20]
+            suggestions.append(dict(
+                id=task_id, title=descriptions[notice_type], source_excerpt=evidence,
+                category="payment" if notice_type in ("trial", "payment", "subscription") else "other",
+                model_score=0.0, priority=priority, due_date=due,
+                date_expression=hint.get("matched_date"), reasons=reasons,
+                message_hash=fingerprint, subject=subject, needs_review=True,
+            ))
+        return dict(subject=subject, message_hash=fingerprint,
+                    reference_date=reference.isoformat(), suggestions=suggestions,
+                    total_candidates=len(suggestions), discarded_over_limit=0,
+                    privacy_note="Only reviewed and approved task details are saved locally.")
+    seen_sentences = set()
     for sentence in sentences(body):
-        if not ACTION_RE.search(sentence) or STOP_RE.search(sentence):continue
+        norm=re.sub(r'\s+',' ',sentence).casefold().strip()
+        if norm in seen_sentences:continue
+        seen_sentences.add(norm)
+        if not ACTION_RE.search(sentence) or STOP_RE.search(sentence) or NON_ACTIONABLE_RE.search(sentence):continue
         if len(sentence)<12:continue
         category,score=classify(sentence)
         if category=='other' and score>0.32:continue

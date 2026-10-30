@@ -143,6 +143,23 @@ def _decode(data):
         raise GmailUnavailable("The selected Gmail message contains invalid text encoding.") from exc
 
 
+def _dedupe_email_body(text):
+    """Collapse duplicate HTML/plain sections while preserving first occurrence."""
+    seen = set()
+    lines = []
+    for raw in text.splitlines():
+        line = re.sub(r"[\u200b-\u200f\u2060\ufeff\u00ad]", "", raw)
+        line = " ".join(line.split()).strip()
+        if not line:
+            continue
+        key = line.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def extract_body(payload):
     """Prefer text/plain, use stripped HTML as fallback. Never fetch attachments."""
     plain, html = [], []
@@ -165,7 +182,7 @@ def extract_body(payload):
 
     walk(payload)
     body = "\n".join(plain).strip() or "\n".join(html).strip()
-    return body[:MAX_BODY]
+    return _dedupe_email_body(body)[:MAX_BODY]
 
 
 def _validate_id(message_id):

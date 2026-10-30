@@ -91,3 +91,18 @@ def test_gmail_message_exposes_reference_date(monkeypatch):
     assert result["reference_date"]=="2026-10-29"
     assert "Trial ends tomorrow." in result["body"]
     assert "<html" not in result["body"]
+
+
+def test_repeated_html_sections_only_appear_once():
+    msg="As a reminder, your Gold free trial ends tomorrow."
+    html=f'<html><body><div>{msg}</div><div>{msg}</div></body></html>'
+    result=gmail.extract_body({"mimeType":"text/html","body":{"data":b64(html)}})
+    assert result.count("Gold free trial ends tomorrow")==1
+
+
+def test_repeated_multipart_plain_bodies_are_deduplicated():
+    text="As a reminder, your Gold free trial ends tomorrow."
+    payload={"mimeType":"multipart/mixed","parts":[
+       {"mimeType":"text/plain","body":{"data":b64(text)}},
+       {"mimeType":"text/plain","body":{"data":b64(text)}}]}
+    assert gmail.extract_body(payload)==text
