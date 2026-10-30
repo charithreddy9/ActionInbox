@@ -31,3 +31,10 @@ def test_old_expired_date_not_new_charge():
 def test_sort():
     rows=[{"due_date":"2026-11-05","subject":"B"},{"due_date":"2026-11-01","subject":"A"}]
     assert sort_items(rows)[0]["subject"]=="A"
+
+def test_numeric_us_deadline():
+    assert hints("Your invoice", "Payment due 11/08/2026.")[0]["due_date"]=="2026-11-08"
+
+def test_adjacent_line_deadline():
+    found=hints("Subscription renewal","Your subscription will renew.\nNovember 8, 2026")
+    assert found and found[0]["due_date"]=="2026-11-08"

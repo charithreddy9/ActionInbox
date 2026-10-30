@@ -240,27 +240,34 @@ if __name__ == "__main__":
     main()
 
 def scan_deadlines(limit=20):
-    """Explicit bounded scan; results returned to browser only, never persisted."""
-    from .deadlines import deadline_hints, sort_items, LIMIT
-    if not 1 <= limit <= LIMIT:
-        raise GmailUnavailable("Scan limit must be between 1 and 25.")
+    """User-triggered bounded scans; nothing persisted."""
+    from .deadlines import deadline_hints,sort_items,LIMIT,TYPES,STATUS_RECEIPT
+    if not 1 <= limit <= LIMIT:raise GmailUnavailable("Scan limit must be between 1 and 25.")
+    queries={
+      "payment":'newer_than:180d {invoice "payment due" "bill due" "amount due" "statement ready" billing}',
+      "subscription":'newer_than:180d {subscription renewal renews membership "auto renew"}',
+      "trial":'newer_than:180d {"trial ends" "trial expires" "free trial" "trial ending"}',
+    }
     try:
         service=_service()
-        query='newer_than:90d (subscription OR renewal OR renews OR trial OR payment OR invoice OR bill OR due OR expires)'
-        response=service.users().messages().list(userId="me",q=query,maxResults=limit,includeSpamTrash=False).execute()
-        matches=[]
-        for entry in response.get("messages",[]):
-            message_id=_validate_id(entry["id"])
+        ids=[];groups={}
+        for kind,query in queries.items():
+            response=service.users().messages().list(userId="me",q=query,maxResults=limit,includeSpamTrash=False).execute()
+            new=[_validate_id(x["id"]) for x in response.get("messages",[])]
+            groups[kind]=len(new);ids.extend(new)
+        ids=list(dict.fromkeys(ids))[:limit*3]
+        matches=[];undated=[]
+        for message_id in ids:
             msg=service.users().messages().get(userId="me",id=message_id,format="full").execute()
             payload=msg.get("payload") or {}
             subject=_header(payload,"Subject") or "(No subject)"
-            sender=_header(payload,"From")
-            sent_date=_header(payload,"Date")
-            body=extract_body(payload)
-            for hint in deadline_hints(subject,body,sent_date):
-                matches.append({"message_id":message_id,"subject":subject,"sender":sender,**hint})
-        return {"items":sort_items(matches),"scanned":len(response.get("messages",[])),"limit":limit,"saved":False,
-                "notice":"Possible deadlines only. Gmail searches can miss emails; review the source before paying or saving a task."}
+            sender=_header(payload,"From");sent_date=_header(payload,"Date")
+            hints=deadline_hints(subject,extract_body(payload),sent_date)
+            for hint in hints:matches.append({"message_id":message_id,"subject":subject,"sender":sender,**hint})
+            if not hints and not STATUS_RECEIPT.search(subject):
+                types=[kind for kind,rule in TYPES.items() if rule.search(subject)]
+                if types:undated.append({"message_id":message_id,"subject":subject,"sender":sender,"type":types[0]})
+        return {"items":sort_items(matches),"undated":undated[:30],"scanned":len(ids),"searched_categories":groups,
+            "saved":False,"notice":"Possible deadlines only. Review original billing accounts; this is not an exhaustive audit."}
     except GmailUnavailable:raise
-    except Exception as exc:
-        raise GmailUnavailable("Deadline scan failed. Check your Gmail connection.") from exc
+    except Exception as exc:raise GmailUnavailable("Deadline scan failed. Check your Gmail connection.") from exc
