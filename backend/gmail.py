@@ -361,7 +361,7 @@ def scan_smart_inbox(limit=20, category="all"):
     A focused category scan can examine up to 25 matching messages.
     """
     from .deadlines import deadline_hints, notice_kind, sort_items
-    from .reminders import reminder_hints
+    from .reminders import reminder_hints, reminder_status
     import time
 
     if not 1 <= limit <= 25:
@@ -415,6 +415,11 @@ def scan_smart_inbox(limit=20, category="all"):
             sender = _header(payload, "From")
             sent = _header(payload, "Date")
             body = extract_body(payload)
+            state = reminder_status(subject)
+            if state == "completed":
+                # A confirmation is not an upcoming deadline or pending task.
+                scanned += 1
+                continue
             finance = deadline_hints(subject, body, sent)
             other, other_kind = reminder_hints(subject, body, sent)
             hints = finance or other
@@ -423,7 +428,9 @@ def scan_smart_inbox(limit=20, category="all"):
             if not hints:
                 kind = notice_kind(subject, body) or other_kind
                 if kind:
-                    undated.append({"message_id": message_id, "subject": subject, "sender": sender, "type": kind})
+                    undated.append({"message_id": message_id, "subject": subject, "sender": sender,
+                                    "type": kind, "status": state,
+                                    "notice": "Pickup may need rescheduling; verify with the carrier." if state == "follow_up" else "Check the original email for the time or due date."})
             scanned += 1
         except Exception as exc:
             # No message bodies/IDs in errors, and no automatic task creation.
@@ -435,7 +442,7 @@ def scan_smart_inbox(limit=20, category="all"):
         raise GmailUnavailable(f"Could not scan Gmail messages ({codes}). Try a focused category scan.")
 
     return {
-        "items": sort_items(dated), "undated": undated[:50],
+        "items": sort_items(dated), "undated": sorted(undated, key=lambda x: 0 if x.get("status") == "follow_up" else 1)[:50],
         "scanned": scanned, "matched_message_ids": len(ids),
         "searched_categories": counts, "scope": category,
         "limit_per_category": actual_limit, "errors": errors[:20],

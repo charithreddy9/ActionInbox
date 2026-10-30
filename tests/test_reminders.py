@@ -34,3 +34,25 @@ def test_ads_and_delivered_not_alerted():
     assert scan("Travel luggage clearance sale","Shop now for discounts.")==( [],None)
     assert scan("Delivered 2 items: Electronics","Delivered today.")==([],None)
     assert scan("Shipped 1 item: Costumes","Your order shipped today.")==([],None)
+
+
+def test_completed_return_dropoff_not_a_reminder():
+    from backend.reminders import reminder_status
+    for title in ("Your return drop off confirmation",
+                  "Your return drop-off confirmation",
+                  "Drop off confirmed for your Amazon return"):
+        assert reminder_status(title) == "completed"
+        assert scan(title, "Your return was accepted on October 28, 2026.") == ([],None)
+
+def test_failed_lugless_pickup_is_followup_not_upcoming():
+    from backend.reminders import reminder_status
+    title="Your luggage pickup was unsuccessful: 830841167"
+    assert reminder_status(title) == "follow_up"
+    hints,kind=scan(title, "Pickup attempt was unsuccessful. Contact support.")
+    assert hints == [] and kind == "travel"
+
+def test_normal_lugless_pickup_still_pending():
+    from backend.reminders import reminder_status
+    title="Luggage pickup reminder: 830841167"
+    assert reminder_status(title) == "pending"
+    assert scan(title, "Your trip is right around the corner.")[1] == "travel"

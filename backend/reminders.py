@@ -23,6 +23,27 @@ EVENTS={
 AD=re.compile(r"\b(?:shop now|exclusive offer|limited.time offer|refer a friend|sale ends|save \d+%|new arrivals|discount code|claim your free trial)\b",re.I)
 NON_EVENTS=re.compile(r"\b(?:has been delivered|was delivered|order delivered|order shipped|shipped \d+ items|your order shipped|out for delivery|thank you for your order|order placed|order confirmation)\b",re.I)
 STRONG=re.compile(r"\b(?:pickup reminder|luggage pickup|pick[- ]?up is scheduled|pick[- ]?up by|check[- ]in opens|boarding starts|appointment reminder|appointment scheduled|flight departs|submission deadline|submit by|must upload|complete your application by|package ready for pickup|collect your package by)\b",re.I)
+
+# Only the subject drives status: legal disclaimers or footer text may
+# reference a past shipment even in an unrelated upcoming reminder.
+COMPLETED_SUBJECT = re.compile(
+    r"\b(?:return\s+drop[- ]?off\s+confirmation|drop[- ]?off\s+(?:confirmed|completed|confirmation)|"
+    r"pickup\s+(?:completed|successful|confirmed)|luggage\s+(?:collected|picked up)|"
+    r"(?:return|package|parcel)\s+(?:has been\s+)?(?:dropped off|collected))\b", re.I
+)
+FAILED_PICKUP_SUBJECT = re.compile(
+    r"\b(?:(?:luggage|baggage|package|parcel|your)\s+)?pick[- ]?up\s+"
+    r"(?:was\s+|has been\s+)?(?:unsuccessful|failed|missed|not completed)\b", re.I
+)
+
+def reminder_status(subject):
+    """Unverified event status for clear travel/logistics subject lines."""
+    if FAILED_PICKUP_SUBJECT.search(subject):
+        return "follow_up"
+    if COMPLETED_SUBJECT.search(subject):
+        return "completed"
+    return "pending"
+
 def _type(text):
     lower=text.lower()
     if any(word in lower for word in ("package","parcel","locker")) and any(word in lower for word in ("pickup","pick-up","pick up","collect","collection")):
@@ -34,8 +55,10 @@ def _type(text):
 
 def reminder_hints(subject,body,sent_date="",today=None):
     today=today or date.today()
-    if MARKETING.search(subject) or AD.search(subject) or RECEIPT.search(subject) or NON_EVENTS.search(subject):
+    if reminder_status(subject)=="completed" or MARKETING.search(subject) or AD.search(subject) or RECEIPT.search(subject) or NON_EVENTS.search(subject):
         return [],None
+    if reminder_status(subject)=="follow_up":
+        return [],"travel"
     first=subject+" "+body[:900]
     kind=_type(subject) or (_type(first) if STRONG.search(first) else None)
     if not kind:return [],None

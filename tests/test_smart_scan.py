@@ -67,3 +67,35 @@ def test_invalid_scope_rejected():
     try:gmail.scan_smart_inbox(20,"everything")
     except gmail.GmailUnavailable:pass
     else:assert False
+
+
+def test_smart_scan_removes_return_confirmation(monkeypatch):
+    msg=GmailMessages()
+    original_get=msg.get
+    def get(**kw):
+        return Request({"payload":{"headers":[
+           {"name":"Subject","value":"Your return drop off confirmation"},
+           {"name":"From","value":"Amazon Return"},
+           {"name":"Date","value":"Thu, 29 Oct 2026 13:00:00 -0400"}],
+           "mimeType":"text/plain", "body":{"data":""}}})
+    msg.get=get
+    monkeypatch.setattr(gmail,"_service",lambda:Service(msg))
+    result=gmail.scan_smart_inbox(20,"travel")
+    assert result["scanned"]==1
+    assert result["undated"]==[] and result["items"]==[]
+
+def test_smart_scan_labels_failed_pickup(monkeypatch):
+    msg=GmailMessages()
+    def get(**kw):
+        return Request({"payload":{"headers":[
+           {"name":"Subject","value":"Your luggage pickup was unsuccessful: 830841167"},
+           {"name":"From","value":"LugLess"},
+           {"name":"Date","value":"Thu, 29 Oct 2026 13:00:00 -0400"}],
+           "mimeType":"text/plain", "body":{"data":""}}})
+    msg.get=get
+    monkeypatch.setattr(gmail,"_service",lambda:Service(msg))
+    result=gmail.scan_smart_inbox(20,"travel")
+    assert len(result["undated"])==1
+    assert result["undated"][0]["status"]=="follow_up"
+    assert result["undated"][0]["type"]=="travel"
+    assert result["items"]==[]
