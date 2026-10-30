@@ -84,3 +84,28 @@ def test_genuine_bill_without_date_is_manual_review():
 
 def test_receipt_excluded_from_undated():
     assert notice_kind("Payment received for your monthly bill", "Your payment was successful.") is None
+
+
+def test_amazon_bundled_trial_offers_not_active_subscriptions():
+    for service in ("Apple Fitness+", "Apple News+", "Apple Arcade"):
+        subject = f"Your recent Amazon purchase includes an {service} trial"
+        body = "Claim the trial to enjoy benefits. After activation the subscription renews automatically on November 20, 2026."
+        assert notice_kind(subject, body) is None
+        assert hints(subject, body) == []
+
+
+def test_music_free_months_eligibility_is_not_an_active_subscription():
+    subject = "Congratulations! You’re eligible for 4 months for $0 🎵"
+    body = "Your music subscription will renew on November 20, 2026 if you choose to start your offer."
+    assert notice_kind(subject, body) is None
+    assert hints(subject, body) == []
+
+
+def test_trial_offer_not_confused_with_genuine_ending_notice():
+    assert notice_kind("Your free trial is ending", "Your trial will end soon.") == "trial"
+    assert notice_kind("Claim your free trial", "After activation, it renews on November 20, 2026.") is None
+    assert hints("Your free trial is ending", "Your free trial ends on November 3, 2026.")[0]["due_date"] == "2026-11-03"
+
+
+def test_real_subscription_notice_still_detected():
+    assert notice_kind("Your streaming subscription will renew", "Your plan renews soon.") == "subscription"

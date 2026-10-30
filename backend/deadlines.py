@@ -41,6 +41,24 @@ RECEIPT = re.compile(
     r"receipt for|order confirmation|subscription cancelled|"
     r"cancellation confirmed|refund issued|successfully renewed)\b", re.I
 )
+
+# Offers may discuss future charges in fine print without showing that the
+# recipient activated a trial. Do not treat these as existing obligations.
+TRIAL_OFFER_SUBJECT = re.compile(
+    r"\b(?:"
+    r"(?:your\s+)?(?:recent\s+)?(?:.{0,80}?\s+)?purchase includes\s+.{0,100}?\btrial\b|"
+    r"you(?:'re|’re|\s+are)\s+eligible\s+for\b|"
+    r"(?:claim|redeem|activate)\s+(?:your\s+)?(?:free\s+)?trial\b|"
+    r"trial (?:offer|promotion|deal)\b|"
+    r"complimentary\s+trial\b"
+    r")", re.I
+)
+
+
+def _is_nonactionable_subject(subject: str) -> bool:
+    return bool(MARKETING.search(subject) or RECEIPT.search(subject) or
+                TRIAL_OFFER_SUBJECT.search(subject))
+
 NUMERIC_US = re.compile(r"\b(\d{1,2}/\d{1,2}/\d{4})\b")
 EXPLICIT = re.compile(
     r"\b(?:\d{4}-\d{2}-\d{2}|"
@@ -81,7 +99,7 @@ def _kind(text: str) -> str | None:
 
 def notice_kind(subject: str, body: str = "") -> str | None:
     """A high-precision heading/early-body candidate without an extracted date."""
-    if MARKETING.search(subject) or RECEIPT.search(subject):
+    if _is_nonactionable_subject(subject):
         return None
     heading = subject + "\n" + body[:1400]
     if MARKETING.search(heading[:200]):
