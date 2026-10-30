@@ -49,7 +49,7 @@ def deadline_hints(subject, body, sent_date="", today=None):
     for idx,line in enumerate(lines):
         window=" ".join(lines[max(0,idx-1):min(len(lines),idx+2)])[:1000]
         if PROMO.search(line) or NEGATIVE.search(line):continue
-        if not re.search(r"\b(due|by|before|renew|expires?|ends?|billing|payment|charge(?:d)?|will be billed)\b",window,re.I):continue
+        if not re.search(r"\b(due|by|before|renews?|renewal|expires?|ends?|billing|payment|charge(?:d)?|will be billed)\b",window,re.I):continue
         typ=next((kind for kind in ("trial","subscription","payment") if TYPES[kind].search(subject+" "+window)),None)
         if not typ:continue
         due,expression=_find_date(line,ref)
