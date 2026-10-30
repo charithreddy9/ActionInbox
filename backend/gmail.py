@@ -241,7 +241,7 @@ if __name__ == "__main__":
 
 def scan_deadlines(limit=20):
     """User-triggered bounded scans; nothing persisted."""
-    from .deadlines import deadline_hints,sort_items,LIMIT,TYPES,STATUS_RECEIPT
+    from .deadlines import deadline_hints, sort_items, LIMIT, notice_kind
     if not 1 <= limit <= LIMIT:raise GmailUnavailable("Scan limit must be between 1 and 25.")
     queries={
       "payment":'newer_than:180d {invoice "payment due" "bill due" "amount due" "statement ready" billing}',
@@ -262,11 +262,12 @@ def scan_deadlines(limit=20):
             payload=msg.get("payload") or {}
             subject=_header(payload,"Subject") or "(No subject)"
             sender=_header(payload,"From");sent_date=_header(payload,"Date")
-            hints=deadline_hints(subject,extract_body(payload),sent_date)
+            body=extract_body(payload)
+            hints=deadline_hints(subject,body,sent_date)
             for hint in hints:matches.append({"message_id":message_id,"subject":subject,"sender":sender,**hint})
-            if not hints and not STATUS_RECEIPT.search(subject):
-                types=[kind for kind,rule in TYPES.items() if rule.search(subject)]
-                if types:undated.append({"message_id":message_id,"subject":subject,"sender":sender,"type":types[0]})
+            if not hints:
+                kind=notice_kind(subject,body)
+                if kind:undated.append({"message_id":message_id,"subject":subject,"sender":sender,"type":kind})
         return {"items":sort_items(matches),"undated":undated[:30],"scanned":len(ids),"searched_categories":groups,
             "saved":False,"notice":"Possible deadlines only. Review original billing accounts; this is not an exhaustive audit."}
     except GmailUnavailable:raise

@@ -1,6 +1,6 @@
 """Synthetic deadline-radar checks; never read real Gmail in CI."""
 from datetime import date
-from backend.deadlines import deadline_hints,sort_items
+from backend.deadlines import deadline_hints,sort_items,notice_kind
 
 TODAY=date(2026,10,30)
 def hints(s,b=""):
@@ -38,3 +38,49 @@ def test_numeric_us_deadline():
 def test_adjacent_line_deadline():
     found=hints("Subscription renewal","Your subscription will renew.\nNovember 8, 2026")
     assert found and found[0]["due_date"]=="2026-11-08"
+
+
+def test_paypal_financing_ad_is_not_a_payment_deadline():
+    subject="Enjoy special financing when you pay over time with the PayPal Credit Card"
+    body="Apply today for a PayPal Credit account. Your next payment could start soon."
+    assert hints(subject,body)==[]
+    assert notice_kind(subject,body) is None
+
+def test_amex_rewards_offer_is_not_a_membership_renewal():
+    subject="Apply and earn 100,000 Membership Rewards points"
+    body="Apply today. Your new membership rewards can be earned after signing up."
+    assert hints(subject,body)==[]
+    assert notice_kind(subject,body) is None
+
+def test_costco_promotional_payment_processing_offer():
+    subject="Switch to Elavon for payment processing and get up to $300 (Terms Apply)"
+    body="Earn a bonus on your payment processor."
+    assert hints(subject,body)==[]
+    assert notice_kind(subject,body) is None
+
+def test_amex_referral_is_not_subscription():
+    subject="Card Member, make the most of Membership & refer a friend"
+    assert hints(subject,"Start earning bonus points today.")==[]
+    assert notice_kind(subject,"Start earning bonus points today.") is None
+
+def test_real_undated_robinhood_trial_remains_reviewable():
+    subject="Your free trial is ending"
+    assert hints(subject,"Your trial is ending soon. Please review your plan.")==[]
+    assert notice_kind(subject,"Your trial is ending soon.")=="trial"
+
+def test_no_contextual_today_false_due():
+    assert hints("Your upcoming payment","Apply today for a special card.")==[]
+
+def test_real_billing_relative_date_is_valid_when_explicit():
+    result=hints("Your bill is ready","Your payment is due tomorrow.")
+    assert result and result[0]["type"]=="payment"
+    assert result[0]["due_date"]=="2026-10-31"
+
+def test_real_subscription_renewal_with_date():
+    assert hints("Upcoming renewal","Your subscription renews on November 8, 2026.")[0]["due_date"]=="2026-11-08"
+
+def test_genuine_bill_without_date_is_manual_review():
+    assert notice_kind("Your statement is ready", "Your bill is available to view.")=="payment"
+
+def test_receipt_excluded_from_undated():
+    assert notice_kind("Payment received for your monthly bill", "Your payment was successful.") is None
