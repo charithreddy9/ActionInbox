@@ -8,6 +8,14 @@
 
 ![ActionInbox frontend checks](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-97a9ff) ![Local ML](https://img.shields.io/badge/ML-scikit--learn-b9ffa7) ![Review first](https://img.shields.io/badge/Task%20approval-Manual-93e6cc)
 
+## Explore the AI development branch
+
+The **default `main` branch** intentionally retains the stable, paste/import-based classifier. The actively developed version adds **read-only Gmail**, Smart Inbox Radar, and **local Ollama/Qwen3 model-driven extraction**. That v5 version remains experimental pending verified local inference and representative accuracy evaluation.
+
+- [Explore local-LLM ActionInbox v5](https://github.com/charithreddy9/ActionInbox/tree/feature/llm-email-intelligence)
+- [See a privacy-safe fictional-email demo and 18-case local evaluation protocol](https://github.com/charithreddy9/ActionInbox/blob/feature/llm-email-intelligence/DEMO.md)
+- [View v5 automated test/build checks](https://github.com/charithreddy9/ActionInbox/actions/workflows/ci.yml?query=branch%3Afeature%2Fllm-email-intelligence)
+
 ## Why this project
 
 My inbox tends to mix two different kinds of information: things I should read, and things I actually need to do. The second kind is easy to lose between newsletters, receipts, and meeting updates. I wanted a tool that could make a first pass over a message, point to the exact sentence that matters, and let me decide whether it belongs on my task list.
