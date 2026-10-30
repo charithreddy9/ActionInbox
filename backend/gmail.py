@@ -354,6 +354,31 @@ SMART_QUERIES = {
 }
 
 
+
+def _prioritize_failed_pickups(items):
+    """Hide old pickup reminders when the same shipment has a failed pickup.
+
+    Only links travel notices by an explicit reference number in the subject.
+    Does not change stored tasks or assert a pickup's current carrier status.
+    """
+    refs = {}
+    for item in items:
+        if item.get("type") != "travel":
+            continue
+        numbers = re.findall(r"(?<!\d)\d{7,20}(?!\d)", item.get("subject", ""))
+        if len(numbers) != 1:
+            continue
+        refs[id(item)] = numbers[0]
+    failed = {
+        ref for item in items
+        if (ref := refs.get(id(item))) and item.get("status") == "follow_up"
+    }
+    return [
+        item for item in items
+        if not (refs.get(id(item)) in failed and item.get("status") == "pending")
+    ]
+
+
 def scan_smart_inbox(limit=20, category="all"):
     """Explicit, bounded Gmail search. A single failing request does not erase results.
 
@@ -442,7 +467,7 @@ def scan_smart_inbox(limit=20, category="all"):
         raise GmailUnavailable(f"Could not scan Gmail messages ({codes}). Try a focused category scan.")
 
     return {
-        "items": sort_items(dated), "undated": sorted(undated, key=lambda x: 0 if x.get("status") == "follow_up" else 1)[:50],
+        "items": sort_items(dated), "undated": sorted(_prioritize_failed_pickups(undated), key=lambda x: 0 if x.get("status") == "follow_up" else 1)[:50],
         "scanned": scanned, "matched_message_ids": len(ids),
         "searched_categories": counts, "scope": category,
         "limit_per_category": actual_limit, "errors": errors[:20],
