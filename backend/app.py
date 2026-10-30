@@ -145,3 +145,9 @@ def gmail_message(message_id: str):
         return get_message(message_id)
     except GmailUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
+
+@app.get('/api/gmail/deadlines')
+def gmail_deadlines(limit:int=20):
+    from .gmail import GmailUnavailable,scan_deadlines
+    try:return scan_deadlines(limit)
+    except GmailUnavailable as exc:raise HTTPException(503,str(exc)) from exc

@@ -238,3 +238,29 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def scan_deadlines(limit=20):
+    """Explicit bounded scan; results returned to browser only, never persisted."""
+    from .deadlines import deadline_hints, sort_items, LIMIT
+    if not 1 <= limit <= LIMIT:
+        raise GmailUnavailable("Scan limit must be between 1 and 25.")
+    try:
+        service=_service()
+        query='newer_than:90d (subscription OR renewal OR renews OR trial OR payment OR invoice OR bill OR due OR expires)'
+        response=service.users().messages().list(userId="me",q=query,maxResults=limit,includeSpamTrash=False).execute()
+        matches=[]
+        for entry in response.get("messages",[]):
+            message_id=_validate_id(entry["id"])
+            msg=service.users().messages().get(userId="me",id=message_id,format="full").execute()
+            payload=msg.get("payload") or {}
+            subject=_header(payload,"Subject") or "(No subject)"
+            sender=_header(payload,"From")
+            sent_date=_header(payload,"Date")
+            body=extract_body(payload)
+            for hint in deadline_hints(subject,body,sent_date):
+                matches.append({"message_id":message_id,"subject":subject,"sender":sender,**hint})
+        return {"items":sort_items(matches),"scanned":len(response.get("messages",[])),"limit":limit,"saved":False,
+                "notice":"Possible deadlines only. Gmail searches can miss emails; review the source before paying or saving a task."}
+    except GmailUnavailable:raise
+    except Exception as exc:
+        raise GmailUnavailable("Deadline scan failed. Check your Gmail connection.") from exc

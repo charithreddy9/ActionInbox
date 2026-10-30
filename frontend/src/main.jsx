@@ -17,6 +17,11 @@ function App(){
   const [running,setRunning]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState(''),[filter,setFilter]=useState('active'),[search,setSearch]=useState('');
   const [saving,setSaving]=useState('');
   const [gmailStatus,setGmailStatus]=useState(null),[gmailQuery,setGmailQuery]=useState('in:inbox newer_than:14d'),[gmailRows,setGmailRows]=useState([]),[gmailMessage,setGmailMessage]=useState(null),[gmailBusy,setGmailBusy]=useState(false),[gmailSubject,setGmailSubject]=useState('');
+  const [radar,setRadar]=useState(null),[radarBusy,setRadarBusy]=useState(false),[radarFilter,setRadarFilter]=useState('all'),[gmailPreset,setGmailPreset]=useState('all');
+  const PRESETS={all:'in:inbox newer_than:14d',payments:'newer_than:90d (invoice OR "payment due" OR "bill due" OR "amount due")',subscriptions:'newer_than:90d (subscription OR renewal OR "will renew" OR membership)',trials:'newer_than:90d ("trial ends" OR "trial expires" OR "free trial")'};
+  async function runRadar(){setRadarBusy(true);setError('');try{const result=await api('/gmail/deadlines?limit=20');setRadar(result);flash('Checked '+result.scanned+' candidate emails. Review any possible deadlines before taking action.')}catch(e){setError(e.message)}finally{setRadarBusy(false)}}
+  const radarItems=(radar?.items||[]).filter(i=>radarFilter==='all'||i.type===radarFilter);
+
   async function refreshGmail(){try{setGmailStatus(await api('/gmail/status'))}catch(e){setError(e.message)}}
   async function loadGmail(){setGmailBusy(true);setGmailMessage(null);setError('');try{const r=await api('/gmail/messages?'+new URLSearchParams({q:gmailQuery,limit:'10'}));setGmailRows(r.messages);flash('Loaded '+r.count+' email headers. No email body was loaded.')}catch(e){setError(e.message)}finally{setGmailBusy(false)}}
   async function pickGmail(id){setGmailBusy(true);setError('');try{setGmailMessage(await api('/gmail/messages/'+encodeURIComponent(id)))}catch(e){setError(e.message)}finally{setGmailBusy(false)}}
@@ -81,8 +86,16 @@ function App(){
           <button className="secondary" onClick={refreshGmail}><RotateCcw size={15}/> Refresh status</button>
         </section>
         {gmailStatus?.connected&&<section className="panel">
+          <h2>Deadline Radar</h2>
+          <p>Look for possible subscription renewals, bill/payment deadlines and trial endings. We check at most 20 matching emails from the last 90 days only when you click Scan. Nothing is saved automatically.</p>
+          <div className="radar-actions"><button className="primary" disabled={radarBusy} onClick={runRadar}>{radarBusy?'Scanning…':'Scan for deadlines'} <Search size={16}/></button>{radar&&<span>Scanned {radar.scanned} candidate emails · {radar.items.length} possible deadlines</span>}</div>
+          {radar&&<><div className="gmail-presets">{[['all','All deadlines'],['payment','Bills & payments'],['subscription','Subscriptions'],['trial','Free trials']].map(([k,label])=><button key={k} className={radarFilter===k?'active':''} onClick={()=>setRadarFilter(k)}>{label}</button>)}</div>
+          <div className="radar-list">{radarItems.map((item,i)=><article key={item.message_id+'-'+item.due_date+'-'+i} className="radar-item"><div className="radar-meta"><span className={'radar-type '+item.type}>{item.type}</span><span className={'radar-priority '+item.priority}>{item.priority==='overdue'?'Past date':item.priority==='soon'?'Within 7 days':'Upcoming'}</span></div><h3>{item.subject}</h3><p><strong>Possible date: {fmt(item.due_date)}</strong> · {item.sender}</p><blockquote>{item.evidence}</blockquote><small>Needs verification: this is a text-based hint, not proof of a charge.</small><button className="secondary" onClick={()=>pickGmail(item.message_id)} disabled={gmailBusy}>Review original email <ArrowRight size={14}/></button></article>)}</div>
+          {!radarItems.length&&<p className="radar-empty">No matching deadline hints in this scan. This does not mean no payments are due: searches and date rules can miss emails.</p>}</>}
+        </section>}
+        {gmailStatus?.connected&&<section className="panel">
           <h2>Choose an email</h2><p>Search up to 10 emails. First we load only their subjects, senders, and dates.</p>
-          <div className="gmail-search"><input aria-label="Gmail search query" value={gmailQuery} maxLength={120} onChange={e=>setGmailQuery(e.target.value)}/><button className="primary" disabled={gmailBusy} onClick={loadGmail}>{gmailBusy?'Loading…':'Find emails'}</button></div>
+          <div className="gmail-presets">{[['all','Recent'],['payments','Payments'],['subscriptions','Subscriptions'],['trials','Free trials']].map(([id,label])=><button key={id} className={gmailPreset===id?'active':''} onClick={()=>{setGmailPreset(id);setGmailQuery(PRESETS[id]);setGmailRows([]);setGmailMessage(null)}}>{label}</button>)}</div><div className="gmail-search"><input aria-label="Gmail search query" value={gmailQuery} maxLength={120} onChange={e=>setGmailQuery(e.target.value)}/><button className="primary" disabled={gmailBusy} onClick={loadGmail}>{gmailBusy?'Loading…':'Find emails'}</button></div>
           <div className="gmail-results">{gmailRows.map(m=><button key={m.id} onClick={()=>pickGmail(m.id)} disabled={gmailBusy}><strong>{m.subject}</strong><span>{m.sender} · {m.date}</span></button>)}</div>
           {gmailMessage&&<div className="gmail-preview"><h3>{gmailMessage.subject}</h3><p>{gmailMessage.sender}</p><pre>{gmailMessage.body||'No readable text body.'}</pre><button className="primary" onClick={useGmailMessage} disabled={!gmailMessage.has_text}>Analyze this email <ArrowRight size={16}/></button></div>}
         </section>}
