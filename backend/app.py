@@ -31,7 +31,8 @@ class TaskIn(BaseModel):
     title:str=Field(min_length=2,max_length=180)
     source_excerpt:str=Field(min_length=1,max_length=350)
     subject:str=Field(default='',max_length=180)
-    category:str=Field(min_length=2,max_length=40,pattern=r'^[a-z0-9_]+    priority:Literal['normal','medium','high']='normal'
+    category:str=Field(min_length=2,max_length=40,pattern=r'^[a-z0-9_]+$')
+    priority:Literal['normal','medium','high']='normal'
     due_date:date|None=None
 class TaskEdit(BaseModel):
     title:str|None=Field(default=None,min_length=2,max_length=180)
